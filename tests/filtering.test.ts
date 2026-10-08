@@ -186,8 +186,12 @@ for (const surface of ['terminal', 'desktop'] as const) {
       'README.md',
     ])
 
-    // git listed the files, never taking a lock a commit beside it needs
-    expect(project.runs.every(argv => argv[0] === 'git' && argv[1] === 'ls-files')).toBe(true)
+    // git listed the files; git alone ran, and only to read: the filter's
+    // list and the markers' status
+    const reads = ['ls-files', 'rev-parse', 'status']
+
+    expect(project.runs.some(argv => argv[1] === 'ls-files')).toBe(true)
+    expect(project.runs.every(argv => argv[0] === 'git' && reads.includes(argv[1] ?? ''))).toBe(true)
 
     await ui.unmount()
   })

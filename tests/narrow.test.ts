@@ -1,7 +1,7 @@
 import type { FsEntry, On } from 'claude-code'
 import { describe, expect, test, type Engine } from 'claude-code/testing'
 
-import { hotkeysOf, overflowsOf } from './drawn'
+import { hotkeysOf, markersOf, overflowsOf } from './drawn'
 import { filterKeyOf } from '../hooks/names'
 import { maxPreviewTop, previewOf, sourceColumnsOf } from '../hooks/preview'
 
@@ -49,19 +49,46 @@ const FOLDERS: Record<string, FsEntry[]> = {
   ),
 }
 
+/**
+ * Git's markers on the root's files and down the deep folders, so the
+ * sweep draws rows with markers; with a file Claude wrote (`openTree`),
+ * both marker columns.
+ */
+const STATUS = [
+  ' M README.md',
+  '?? main-with-a-rather-long-name.ts',
+  '!! archive.zip',
+  `?? ${DEEP.join('/')}/a-file-at-the-bottom-of-it-all.txt`,
+]
+  .map(field => `${field}\0`)
+  .join('')
+
+/**
+ * What git writes: for the markers, where the root sits and the status;
+ * for the filter, every file, and none ignored or deleted.
+ */
+function gitOutputOf(argv: readonly string[]): string {
+  if (argv[1] === 'rev-parse') {
+    return `\n${ROOT}/.git\n`
+  }
+
+  if (argv[1] === 'status') {
+    return STATUS
+  }
+
+  return argv.includes('--cached') ? Object.keys(FILES).map(path => `${path.slice(ROOT.length + 1)}\0`).join('') : ''
+}
+
 function stubProject(on: On): void {
+  on('tool.call', () => ({ result: 'ok' }))
   on('session.root', () => ({ value: ROOT }))
   on('ui.panes', () => ({ value: [] }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.focus', () => ({}))
-
-  // git lists every file for the filter, and ignores and deletes none
   on('process.run', ($, e) => ({
     value: {
       exitCode: 0,
-      stdout: e.argv.includes('--cached')
-        ? Object.keys(FILES).map(path => `${path.slice(ROOT.length + 1)}\0`).join('')
-        : '',
+      stdout: gitOutputOf(e.argv),
       stderr: '',
       isStdoutTruncated: false,
       isStderrTruncated: false,
@@ -79,13 +106,16 @@ function stubProject(on: On): void {
   on('fs.read', ($, e) => ({ value: FILES[e.path] ?? '' }))
 }
 
-const openTree = ($: Engine, isFullscreen: boolean) =>
-  $.command.run({
+const openTree = async ($: Engine, isFullscreen: boolean) => {
+  await $.tool.call({ tool: 'Write', file_path: `${ROOT}/data.csv`, content: '' } as never)
+
+  return $.command.run({
     command: 'tree',
     args: '',
     origin: { kind: 'composer' },
     presentation: { isFullscreen, columns: 160 },
   })
+}
 
 const WIDTHS = [16, 24, 32, 40, 60, 120] as const
 
@@ -181,6 +211,18 @@ describe('rows fit the body at every width', () => {
           expect(drawn.type, `${bodyColumns} columns: drawn by the plugin`).not.toBe('engine')
           expect(overflowsOf(drawn, columns), `${bodyColumns} columns`).toEqual([])
           expect(new Set(hotkeys).size, `${bodyColumns} columns: one Button a hotkey`).toBe(hotkeys.length)
+
+          // The rows swept carry both marker columns, in a filtered tree too
+          if (view.name === 'tree') {
+            expect(markersOf(drawn, 'README.md'), `${bodyColumns} columns: markers`).toBe('  M')
+            expect(markersOf(drawn, 'data.csv'), `${bodyColumns} columns: markers`).toBe(' ✻ ')
+          }
+
+          if (view.name === 'filtered deep') {
+            const bottom = `${DEEP.join('/')}/a-file-at-the-bottom-of-it-all.txt`
+
+            expect(markersOf(drawn, bottom), `${bodyColumns} columns: markers`).toBe(' ?')
+          }
         }
 
         await ui.unmount()

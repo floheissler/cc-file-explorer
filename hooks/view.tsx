@@ -1,7 +1,7 @@
 /* @jsxRuntime classic */
 /* @jsx h */
 /* @jsxFrag Fragment */
-import type { ElementTable, RenderElement } from 'claude-code'
+import type { ElementTable, RenderElement, ThemeKey } from 'claude-code'
 
 import type { MarkdownMode } from '../types'
 import { fitRow, hintOf, legendsOf, wrapCells, type Control, type Legend } from './fit'
@@ -16,6 +16,14 @@ import {
   tableWindowOf,
   type Preview,
 } from './preview'
+import {
+  CHANGES_GLYPH,
+  GIT_LETTERS,
+  WRITTEN_GLYPH,
+  type GitState,
+  type RowMark,
+  type TreeMarks,
+} from './status'
 import { cellWidth, formatBytes, padEnd, plural, sanitize, truncateEnd, truncateMiddle } from './text'
 import { branchPrefixOf, type TreeRow, type TreeWindow } from './tree'
 
@@ -89,6 +97,10 @@ export type PaneModel = {
   readonly inlineView: InlineView | null
   readonly rootName: string
   readonly rows: readonly TreeRow[]
+  /**
+   * The markers at the rows' right ends: git's, and Claude's writes.
+   */
+  readonly marks: TreeMarks
   readonly window: TreeWindow
   readonly layout: PaneLayout
   readonly selected: string | null
@@ -141,6 +153,36 @@ type Kit = {
    */
   readonly columns: number
 }
+
+/**
+ * How a Text is colored: in a theme color, which follows the person's
+ * theme, or dim.
+ */
+type Tone = { readonly color: ThemeKey } | { readonly dimColor: true }
+
+/**
+ * Keys in the color a plain Button draws its hotkey in.
+ */
+const KEY_TONE: Tone = { color: 'suggestion' }
+
+/**
+ * Git's markers in the colors of a diff: new in green, changed in yellow,
+ * gone or conflicting in red, ignored dim.
+ */
+const GIT_TONES: Readonly<Record<GitState, Tone>> = {
+  conflicted: { color: 'error' },
+  deleted: { color: 'error' },
+  modified: { color: 'warning' },
+  renamed: { color: 'success' },
+  added: { color: 'success' },
+  untracked: { color: 'success' },
+  ignored: { dimColor: true },
+}
+
+/**
+ * Claude's writes in Claude's own color.
+ */
+const WRITTEN_TONE: Tone = { color: 'claude' }
 
 /**
  * The pane's tree: the header, then the help view, or the filter's row while
@@ -297,13 +339,37 @@ const notLabelledIn = (controls: readonly ActionControl[], legend: Legend) =>
 const DIGITS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as const
 
 /**
- * One group of the help view: its keys and what each does, and lines of
- * its own under them.
+ * One row of a help group: its keys (or the marker it explains), what it
+ * does or means, and the marker's own tone; keys are drawn in the color of
+ * a plain Button's hotkey.
+ */
+type HelpRow = readonly [keys: string, does: string, tone?: Tone]
+
+/**
+ * One group of the help view: its rows, and lines of its own under them.
  */
 type HelpSection = {
   readonly title: string
-  readonly rows: readonly (readonly [string, string])[]
+  readonly rows: readonly HelpRow[]
   readonly notes?: readonly string[]
+}
+
+/**
+ * What the markers at the rows' right ends mean.
+ */
+const MARKERS: HelpSection = {
+  title: 'Markers',
+  rows: [
+    [GIT_LETTERS.modified, 'changed since the last commit', GIT_TONES.modified],
+    [GIT_LETTERS.added, 'new, staged', GIT_TONES.added],
+    [GIT_LETTERS.renamed, 'renamed, staged', GIT_TONES.renamed],
+    [GIT_LETTERS.untracked, 'new, not tracked yet', GIT_TONES.untracked],
+    [GIT_LETTERS.deleted, 'removed from git, kept on disk', GIT_TONES.deleted],
+    [GIT_LETTERS.conflicted, 'in a merge conflict', GIT_TONES.conflicted],
+    [GIT_LETTERS.ignored, 'ignored by git, or in an ignored folder', GIT_TONES.ignored],
+    [CHANGES_GLYPH, 'a folder with changes in it, colored by the strongest', GIT_TONES.modified],
+    [WRITTEN_GLYPH, 'Claude wrote it this session (a folder: something in it)', WRITTEN_TONE],
+  ],
 }
 
 /**
@@ -359,6 +425,7 @@ function helpSectionsOf(seat: Seat): readonly HelpSection[] {
       keys,
       filter,
       mouse,
+      MARKERS,
       {
         title: 'Pane',
         rows: [
@@ -384,7 +451,7 @@ function helpSectionsOf(seat: Seat): readonly HelpSection[] {
     ],
   }
 
-  return seat.isClassic ? [keys, filter, pane] : [keys, filter, mouse, pane]
+  return seat.isClassic ? [keys, filter, MARKERS, pane] : [keys, filter, mouse, MARKERS, pane]
 }
 
 /**
@@ -394,7 +461,7 @@ function helpSectionsOf(seat: Seat): readonly HelpSection[] {
  */
 type HelpLine =
   | { readonly kind: 'title' | 'note'; readonly text: string }
-  | { readonly kind: 'key'; readonly keys: string; readonly text: string }
+  | { readonly kind: 'key'; readonly keys: string; readonly text: string; readonly tone: Tone }
   | { readonly kind: 'blank' }
 
 const HELP_KEY_COLUMNS = 12
@@ -419,12 +486,13 @@ function helpLinesOf(seat: Seat, columns: number): HelpLine[] {
   return helpSectionsOf(seat).flatMap((section, at): HelpLine[] => [
     ...(at > 0 ? [{ kind: 'blank' } as const] : []),
     { kind: 'title', text: truncateEnd(section.title, columns) },
-    ...section.rows.flatMap(([keys, does]) =>
+    ...section.rows.flatMap(([keys, does, tone = KEY_TONE]) =>
       wrapCells(does, room).map(
         (text, row): HelpLine => ({
           kind: 'key',
           keys: row === 0 ? padEnd(truncateEnd(keys, Math.max(1, keyColumns - 1)), keyColumns) : ' '.repeat(keyColumns),
           text,
+          tone,
         }),
       ),
     ),
@@ -465,7 +533,7 @@ function helpRegion(kit: Kit, rows: number, seat: Seat): RenderElement {
       case 'key':
         return (
           <Box flexDirection="row" height={1}>
-            <Text color="suggestion">{line.keys}</Text>
+            <Text {...line.tone}>{line.keys}</Text>
             <Text dimColor wrap="truncate-end">
               {line.text}
             </Text>
@@ -582,7 +650,7 @@ function treeRegion(kit: Kit, model: PaneModel): RenderElement {
       )}
       {rows
         .slice(window.start, window.end)
-        .map(row => treeRow(kit, row, model.selected, model.inlineView === 'tree'))}
+        .map(row => treeRow(kit, row, model.marks, model.selected, model.inlineView === 'tree'))}
       {window.below > 0 && (
         <Text dimColor wrap="truncate-end">
           {truncateEnd(`↓ ${window.below} more`, kit.columns)}
@@ -606,20 +674,61 @@ function branchOf(row: TreeRow, columns: number): string {
 }
 
 /**
- * One row of the tree: its branch lines, dim, then the row itself. An entry
- * is a Button padded to the row's end, so the name and the rest of the row
- * press it; the branch lines are drawing only. In an inline pane's tree the
- * picked file's row takes the focus ring as the pane takes the keyboard, so
- * stepping back from the file lands on it.
+ * The cells the markers take at the end of every row of a tree that has
+ * any: a gap, then a cell for Claude's writes and a cell for git, each
+ * where some row has one, so the markers of all rows line up.
+ */
+function markCellsOf(marks: TreeMarks): number {
+  const columns = (marks.hasWritten ? 1 : 0) + (marks.hasGit ? 1 : 0)
+
+  return columns === 0 ? 0 : columns + 1
+}
+
+/**
+ * The cells a row's Button keeps at least: its glyph, a gap and a cell of
+ * its name. A row narrower than that with its markers draws none.
+ */
+const MIN_BUTTON_CELLS = 3
+
+/**
+ * A marked row's markers, after the gap that sets them off from its name;
+ * a column the row has no marker in is blank, so the next one lines up.
+ */
+function markTexts(kit: Kit, mark: RowMark, marks: TreeMarks): RenderElement[] {
+  const { Text } = kit.ui
+  const blank = { glyph: ' ', tone: { dimColor: true } as Tone }
+
+  const cells = [
+    ...(marks.hasWritten ? [mark.isWritten ? { glyph: WRITTEN_GLYPH, tone: WRITTEN_TONE } : blank] : []),
+    ...(marks.hasGit ? [mark.git === null ? blank : { glyph: mark.git.glyph, tone: GIT_TONES[mark.git.state] }] : []),
+  ]
+
+  return cells.map((cell, at) => (
+    <Text {...cell.tone} wrap="truncate-start">
+      {at === 0 ? ` ${cell.glyph}` : cell.glyph}
+    </Text>
+  ))
+}
+
+/**
+ * One row of the tree: its branch lines, dim, then the row itself, then
+ * its markers. An entry is a Button padded to the markers, or to the row's
+ * end when it has none, so the name and the rest of the row press it; the
+ * branch lines and the markers are drawing only. Names stop short of the
+ * markers' cells in every row of a tree that has them. In an inline pane's
+ * tree the picked file's row takes the focus ring as the pane takes the
+ * keyboard, so stepping back from the file lands on it.
  */
 function treeRow(
   kit: Kit,
   row: TreeRow,
+  marks: TreeMarks,
   selected: string | null,
   isInlineTree: boolean,
 ): RenderElement {
   const { Box, Text, Button } = kit.ui
-  const branch = branchOf(row, kit.columns)
+  const markCells = markCellsOf(marks)
+  const branch = branchOf(row, kit.columns - markCells)
   const room = Math.max(1, kit.columns - branch.length)
 
   if (row.type === 'note') {
@@ -647,8 +756,10 @@ function treeRow(
   const isSelected = row.path === selected
   const glyph = isDir ? (row.isExpanded ? '▾' : '▸') : isSelected ? '•' : ' '
   const lead = `${glyph} `
-  const name = truncateMiddle(sanitize(row.name), Math.max(1, room - cellWidth(lead)))
-  const label = padEnd(`${lead}${name}`, room)
+  const mark = marks.byPath.get(row.path)
+  const cells = room - markCells >= MIN_BUTTON_CELLS ? markCells : 0
+  const name = truncateMiddle(sanitize(row.name), Math.max(1, room - cells - cellWidth(lead)))
+  const label = padEnd(`${lead}${name}`, mark === undefined || cells === 0 ? room : room - cells)
 
   const onPress = isDir
     ? () => kit.actions.toggleDir(row.path)
@@ -667,6 +778,7 @@ function treeRow(
         onPress={onPress}
         {...(isInlineTree && isSelected ? { autoFocus: true } : {})}
       />
+      {mark !== undefined && cells > 0 && markTexts(kit, mark, marks)}
     </Box>
   )
 }

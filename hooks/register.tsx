@@ -16,6 +16,7 @@ import {
   type FilterView,
 } from './filter'
 import { focusOrderOf, focusStepOf, type FocusOrder } from './focus'
+import { hasStampMoved, isSameRead, readGitStatus, stampsOf, type GitRead } from './git'
 import type { Host } from './host'
 import {
   escapeStepOf,
@@ -34,6 +35,7 @@ import {
   readFileList,
   readPreview,
   readTree,
+  realKeyOf,
   stampDirs,
   type Listing,
 } from './listing'
@@ -46,9 +48,17 @@ import {
   TIP_SHOWN_KEY,
   WIDEN_TIP_TEXT,
 } from './names'
-import { ancestorsOf, foldKey, rootLabelOf, styleOf } from './paths'
-import { changedDirsOf, mayHaveWritten, pollBatchOf, shownDirsOf } from './poll'
+import { ancestorsOf, foldKey, isSameKey, keyOf, rootLabelOf, styleOf } from './paths'
+import {
+  changedDirsOf,
+  hasSucceeded,
+  mayHaveWritten,
+  pollBatchOf,
+  shownDirsOf,
+  writtenPathOf,
+} from './poll'
 import { maxPreviewTop, previewHeightOf, sourceColumnsOf, type Preview } from './preview'
+import { NO_MARKS, treeMarksOf } from './status'
 import { messageOf } from './text'
 import {
   clamp,
@@ -86,6 +96,13 @@ const PREVIEW_TOP = atom({ plugin: 'file-explorer', key: 'previewTop' } as const
 const MARKDOWN_MODE = atom({ plugin: 'file-explorer', key: 'markdownMode' } as const, 'rendered')
 const HELP_SHOWN = atom({ plugin: 'file-explorer', key: 'helpShown' } as const, false)
 const FILTER = atom({ plugin: 'file-explorer', key: 'filter' } as const, null)
+
+/**
+ * The files Claude wrote this session, which the tree marks: session state
+ * too, so `/clear` and `/resume` start a new list, as they start a new
+ * session.
+ */
+const WRITTEN = atom({ plugin: 'file-explorer', key: 'written' } as const, [])
 
 /**
  * What the last drawing laid out: the scroll and focus hooks steer by it.
@@ -128,6 +145,7 @@ function hostOf($: EngineInterface): Host {
     run: (argv, init) => $.process.run(argv, init),
     list: path => $.fs.list(path),
     stat: path => $.fs.stat(path),
+    realPath: async path => (await $.fs.stat(path, { resolve: true })).realPath,
     read: path => $.fs.read(path),
     panes: () => $.ui.panes(),
     invalidate: () => $.ui.invalidate('ui.render'),
@@ -179,6 +197,12 @@ function hostOf($: EngineInterface): Host {
         get: () => read($, FILTER),
         set: async fn => {
           await update($, FILTER, fn)
+        },
+      },
+      written: {
+        get: () => read($, WRITTEN),
+        set: async fn => {
+          await update($, WRITTEN, fn)
         },
       },
     },
@@ -303,7 +327,19 @@ export const register: Register = on => {
   }
 
   /**
-   * Drops what was read, so the next drawing reads the project afresh.
+   * Git's view of the tree as last read, null where the root is in no
+   * repository or git failed; the read under way, one at a time, and
+   * whether another was asked for meanwhile; and whether what is held is
+   * due a read, as after `forget`, which keeps it drawn until then.
+   */
+  let gitRead: GitRead | null = null
+  let gitLoad: Promise<void> | null = null
+  let isGitDue = false
+  let isGitStale = true
+
+  /**
+   * Drops what was read, so the next drawing reads the project afresh. Git's
+   * view stays drawn until it is read again, so markers do not blink.
    */
   const forget = () => {
     listing = null
@@ -316,6 +352,77 @@ export const register: Register = on => {
     polling.cursor = 0
     dropFileList()
     leaveFilter()
+    isGitStale = true
+  }
+
+  /**
+   * Reads git's view of the tree, and redraws when it says something new.
+   * A read asked for while one runs is run once after it, and the promise
+   * settles when that one has: every caller sees git as it stood after it
+   * asked.
+   */
+  const loadGit = (host: Host): Promise<void> => {
+    if (gitLoad !== null) {
+      isGitDue = true
+
+      return gitLoad
+    }
+
+    gitLoad = (async () => {
+      try {
+        do {
+          isGitDue = false
+
+          const read = await readGitStatus(host, await host.root())
+          const isSame = isSameRead(gitRead, read)
+
+          gitRead = read
+          isGitStale = false
+
+          if (!isSame) {
+            host.invalidate()
+          }
+        } while (isGitDue)
+      } finally {
+        gitLoad = null
+      }
+    })()
+
+    return gitLoad
+  }
+
+  /**
+   * Whether the repository's index or HEAD moved since git was read: a
+   * commit, a stage or a checkout made outside Claude. Not while a read
+   * runs, which stamps them afresh.
+   */
+  const hasGitMoved = async (host: Host): Promise<boolean> => {
+    const read = gitRead
+
+    if (read === null || gitLoad !== null) {
+      return false
+    }
+
+    return hasStampMoved(read.stamps, await stampsOf(host, [...read.stamps.keys()]))
+  }
+
+  /**
+   * Remembers a file Claude wrote this session by its key, the latest
+   * last; a path outside the root is left out.
+   */
+  const recordWritten = async (host: Host, path: string) => {
+    const root = await host.root()
+    const key = keyOf(root, path) ?? (await realKeyOf(host, root, path))
+
+    if (key === null || key === '') {
+      return
+    }
+
+    const style = styleOf(root)
+
+    await host.state.written.set(keys =>
+      [...keys.filter(known => !isSameKey(known, key, style)), key].slice(-Limits.MAX_WRITTEN_FILES),
+    )
   }
 
   /**
@@ -611,8 +718,9 @@ export const register: Register = on => {
 
   /**
    * Re-reads the tree's open folders, the previewed file and, the next time
-   * the tree is filtered, the project's file list; and redraws. A closed
-   * pane only forgets what it read: it reads afresh on opening.
+   * the tree is filtered, the project's file list; and redraws; then git's
+   * view of them. A closed pane only forgets what it read: it reads afresh
+   * on opening.
    */
   const refresh = async (host: Host) => {
     const isOpen = (await host.panes()).some(pane => pane.id === PANE_ID)
@@ -654,6 +762,8 @@ export const register: Register = on => {
     }
 
     host.invalidate()
+
+    await loadGit(host)
   }
 
   /**
@@ -684,9 +794,13 @@ export const register: Register = on => {
    * the cap; the changed ones listed again, a bounded few; and the previewed
    * file. While the tree is filtered, the folders the filtered tree shows,
    * and a change among them reads the file list again, so a new match
-   * appears. A poll never writes state.
+   * appears. Git is read again when any of them changed, or when the
+   * repository's index or HEAD moved, as a commit or a stage made outside
+   * Claude moves no file the tree shows; never on every poll. A poll never
+   * writes state.
    *
-   * @returns whether anything drawn changed
+   * @returns whether the tree or the preview changed; a git read redraws
+   *   by itself
    */
   const pollOnce = async (host: Host, current: Listing): Promise<boolean> => {
     const text = await host.state.filter.get()
@@ -706,8 +820,13 @@ export const register: Register = on => {
     }
 
     const isPreviewRead = await pollPreview(host, current)
+    const isChanged = changed.length > 0 || isPreviewRead
 
-    return changed.length > 0 || isPreviewRead
+    if (isChanged || (await hasGitMoved(host))) {
+      await loadGit(host)
+    }
+
+    return isChanged
   }
 
   /**
@@ -1147,12 +1266,14 @@ export const register: Register = on => {
     }
 
     // A pane opens on the whole tree: a file shown inline, the help, or a
-    // filter is left
+    // filter is left. Git is read beside the open, never before it: its
+    // markers follow
     forget()
     lastFocused = undefined
     isFileShown = false
     await update($, HELP_SHOWN, () => false)
     await update($, FILTER, () => null)
+    void loadGit(hostOf($)).catch(() => undefined)
     await ensureListing(hostOf($)).catch(() => undefined)
 
     await $.ui.open(paneArgsOf(e.presentation?.isFullscreen === false))
@@ -1171,15 +1292,17 @@ export const register: Register = on => {
     const host = hostOf($)
     const { Box, Text, Button, Code, Markdown, Input } = $.ui.resolve(e)
 
-    const [expanded, selected, treeTop, previewTop, markdownMode, helpShown, filterText] = await Promise.all([
-      read($, EXPANDED),
-      read($, SELECTED),
-      read($, TREE_TOP),
-      read($, PREVIEW_TOP),
-      read($, MARKDOWN_MODE),
-      read($, HELP_SHOWN),
-      read($, FILTER),
-    ])
+    const [expanded, selected, treeTop, previewTop, markdownMode, helpShown, filterText, written] =
+      await Promise.all([
+        read($, EXPANDED),
+        read($, SELECTED),
+        read($, TREE_TOP),
+        read($, PREVIEW_TOP),
+        read($, MARKDOWN_MODE),
+        read($, HELP_SHOWN),
+        read($, FILTER),
+        read($, WRITTEN),
+      ])
 
     const current = listing
 
@@ -1207,6 +1330,17 @@ export const register: Register = on => {
     if (current !== null && unread.length > 0) {
       void loadDirs(host, current, unread).catch(() => undefined)
     }
+
+    // Git's view as last read, of this root: a reload of the module drew
+    // none yet, and reads it now
+    if (isGitStale && gitLoad === null) {
+      void loadGit(host).catch(() => undefined)
+    }
+
+    const marks =
+      current === null
+        ? NO_MARKS
+        : treeMarksOf(rows, gitRead?.root === current.root ? gitRead.status : null, written, styleOf(current.root))
 
     const isPreviewStale = selected !== null && preview?.path !== selected
 
@@ -1274,6 +1408,7 @@ export const register: Register = on => {
         inlineView,
         rootName: current === null ? 'Explorer' : rootLabelOf(current.root),
         rows,
+        marks,
         window,
         layout,
         selected,
@@ -1419,13 +1554,15 @@ export const register: Register = on => {
 
   /**
    * After a tool call that may have changed files, an open pane re-reads
-   * what it shows once Claude pauses: an edit, or a shell command (Bash, or
-   * PowerShell on native Windows) the engine did not hold read-only. A call
-   * that threw may have written too.
+   * what it shows, git's view included, once Claude pauses: an edit, or a
+   * shell command (Bash, or PowerShell on native Windows) the engine did
+   * not hold read-only. A call that threw may have written too. An edit
+   * that went through marks its file as written this session, open pane or
+   * not.
    *
    * The hook only watches. It has no `.catch`, whose handler would run the
    * call again after a throw of `next`: that throw passes on as it came, and
-   * scheduling the refresh cannot throw.
+   * neither scheduling the refresh nor marking the file throws.
    *
    * PowerShell is matched by pattern: only Windows builds have the tool, so
    * the tool names other builds type the matcher with leave it out.
@@ -1444,6 +1581,12 @@ export const register: Register = on => {
         } catch {
           // The call's own outcome stands
         }
+      }
+
+      const written = writtenPathOf(e)
+
+      if (written !== null && hasSucceeded(result)) {
+        await recordWritten(hostOf($), written).catch(() => undefined)
       }
     }
   })

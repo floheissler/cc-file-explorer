@@ -30,6 +30,7 @@ export type PaneState = {
   readonly markdownMode: StateCell<MarkdownMode>
   readonly helpShown: StateCell<boolean>
   readonly filter: StateCell<string | null>
+  readonly written: StateCell<string[]>
 }
 
 /**
@@ -44,11 +45,18 @@ export type Host = {
    */
   readonly root: () => Promise<string>
   /**
-   * Runs a program (git) with no shell: the filter's file list.
+   * Runs a program by its argument vector, no shell, and resolves once it
+   * exits, any exit code. The mod runs `git` alone, through `git.ts`: the
+   * filter's file list and the markers' status.
    */
   readonly run: (argv: readonly string[], init: ProcessRunInit) => Promise<ProcessRunResult>
   readonly list: (path: string) => Promise<readonly FsEntry[]>
   readonly stat: (path: string) => Promise<FsStat>
+  /**
+   * Where a path lands, every link followed and `.`/`..` folded; undefined
+   * where it leads nowhere. Rejects when the path is missing.
+   */
+  readonly realPath: (path: string) => Promise<string | undefined>
   readonly read: (path: string) => Promise<string>
   /**
    * This plugin's open panes.

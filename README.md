@@ -3,7 +3,9 @@
 A file explorer pane for Claude Code. `/tree` opens the project beside the
 conversation as a tree you expand and collapse in place, and previews the file
 you pick under it: Markdown rendered as Claude's replies are, CSV and TSV as
-tables, source and text files with syntax colors and line numbers.
+tables, source and text files with syntax colors and line numbers. Markers
+beside the names show git's status of each file and the files Claude wrote
+this session.
 
 It is a [mod](https://code.claude.com/docs/en/plugins/mods/overview): a plugin
 of function hooks that draws in Claude Code's own interface, in the terminal
@@ -71,7 +73,7 @@ descriptions wrap to the width.
 | `c` | Close the deepest open folders, one level; repeat for more |
 | `1` – `9` | Open folders exactly that many levels deep |
 | `0` | Close every folder |
-| `r` | Re-read the tree and the previewed file at once |
+| `r` | Re-read the tree, the previewed file and git's status at once |
 | `f` | Filter the tree by name: shows the filter's field over the tree, the keyboard in it; again to close the filter |
 | `h` | Show or hide the help view |
 | Click the previewed file again (docked), or press `x` | Close the preview |
@@ -100,6 +102,25 @@ Keys work while the pane has the keyboard: click it, or press Ctrl+X then Tab.
 - Names too long for the pane cut in the middle, measured in terminal columns
   as Claude Code measures them: CJK and most emoji take two, accents none, and
   a cut never splits a character.
+- Markers at the right end of a row, in a column of their own (`h` lists
+  them; the colors follow your Claude Code theme):
+
+  | Marker | Means |
+  | --- | --- |
+  | `M` (yellow) | Changed since the last commit, staged or not |
+  | `A`, `R` (green) | Staged as new, or renamed |
+  | `?` (green) | New, not tracked by git yet |
+  | `D` (red) | Removed from git but still on disk (`git rm --cached`) |
+  | `U` (red) | In a merge conflict |
+  | `!` (dim) | Ignored by git, or inside an ignored folder |
+  | `•` | A folder with changes inside, in the color of the strongest |
+  | `✻` (Claude's color) | Claude wrote it this session with Write, Edit or NotebookEdit; on a folder, something inside |
+
+  The letters are `git status --short`'s. Ignored entries keep the tree's own
+  styling (folders bright, files dim) and only gain their `!`. Outside a git
+  repository, or without git, rows show only Claude's marks. A root inside a
+  repository marks its own entries; a root inside an ignored folder is
+  ignored whole.
 
 The tree and the open preview keep up with the disk:
 
@@ -113,6 +134,12 @@ The tree and the open preview keep up with the disk:
   hidden or closed pane checks nothing.
 - A previewed file that is deleted shows a notice in place of its text, and
   comes back if the file does.
+- Git's status is read when the pane opens, on `r`, after Claude's edits and
+  commands, and when a check found a change, never on every check. Each
+  check also looks at the repository's index and HEAD, so a commit, a
+  stage or a checkout in another terminal shows within a few seconds. A
+  file edited in place outside Claude moves neither its folder nor the
+  index: its `M` shows at the next read (press `r`).
 
 ### Filter by name
 
@@ -174,6 +201,14 @@ Known limits:
   linked file does not preview. Windows junctions are expected to behave the
   same.
 - Windows cannot read names that end in a dot or a space.
+- Git markers need `git` on the `PATH`. They are left out where git cannot
+  answer within 10 seconds, on a share it cannot open (`\\wsl.localhost\…`
+  from Windows), or in a repository git holds unsafe (`safe.directory`). A
+  status larger than 4 MB marks what fits.
+- A file deleted from disk has no row to mark; its folder still shows the
+  change's dot.
+- Under Windows git's paths match the tree's in any case; under macOS and
+  Linux they match in case, and composed and decomposed accents match.
 
 ## How it works
 
@@ -182,12 +217,12 @@ Known limits:
 | Event | What the hook does |
 | --- | --- |
 | `session.start` | Registers `/tree`; after a reload of the module, starts the checks again for a pane still open |
-| `command.run` of `tree` | Opens the pane on its tree, focused (above the prompt: up to 40 rows, closed by Esc under the classic renderer), and starts its checks for outside changes, or closes it when it is shown; leaves the one-time tip |
-| `ui.render` of the `Pane` | Draws for where the pane sits. Docked: the header, the filter's row while it is shown, the tree's window (filtered while the filter holds a query) and, set off by a blank row and a rule with the file's name, the preview's window, each exactly as tall as its region. Above the prompt: one view, the tree or the file or the help, as tall as its content. Reads what the drawing needs but lacks |
+| `command.run` of `tree` | Opens the pane on its tree, focused (above the prompt: up to 40 rows, closed by Esc under the classic renderer), reads git's status beside it, and starts its checks for outside changes, or closes it when it is shown; leaves the one-time tip |
+| `ui.render` of the `Pane` | Draws for where the pane sits. Docked: the header, the filter's row while it is shown, the tree's window (filtered while the filter holds a query) and, set off by a blank row and a rule with the file's name, the preview's window, each exactly as tall as its region. Above the prompt: one view, the tree or the file or the help, as tall as its content. Rows carry their markers. Reads what the drawing needs but lacks |
 | `ui.scroll` of the pane | Moves the tree's or the preview's own window by the region under the pointer, as far as the wheel's rows say; the engine's window over the pane stays still |
 | `ui.focus` in the pane | Keeps the focused row and its neighbors in view, so the arrows always have a drawn row to move to, and lands the focus where that row is drawn after the window moves; keeps the focus off the hidden digit keys |
 | `ui.close` of the pane | Above the prompt, a person's close steps back first: from the file or the help to the tree, from a filtered tree to the whole tree; a close that goes through stops the checks for outside changes |
-| `tool.call` of `Write`, `Edit`, `NotebookEdit`, `Bash`, `PowerShell` | After a call that may have written (not held read-only, not denied), re-reads an open pane's tree, preview and, while filtering, file list once Claude pauses |
+| `tool.call` of `Write`, `Edit`, `NotebookEdit`, `Bash`, `PowerShell` | After a call that may have written (not held read-only, not denied), re-reads an open pane's tree, preview, git status and, while filtering, file list once Claude pauses; after an edit that went through, marks its file as written this session |
 | `classic.SessionStart` after `/clear`, `/resume`, `/branch` | Forgets what was read, as the session state resets |
 
 It calls `$.session.root`, `$.fs.list`, `$.fs.stat`, `$.fs.read`,
@@ -195,16 +230,21 @@ It calls `$.session.root`, `$.fs.list`, `$.fs.stat`, `$.fs.read`,
 `$.ui.close`, `$.ui.panes`, `$.ui.resolve`, `$.ui.invalidate`, `$.ui.focus`,
 `$.ui.log`, `$.ui.toast`, `$.store.get`, `$.store.set` and its own
 `$.state`. It makes no network calls and writes no files of its own. The
-one process it starts is `git ls-files`, which only reads, for the filter's
-file list, with `GIT_OPTIONAL_LOCKS=0` so it never takes a lock a commit
-beside it needs. Its one stored value, whether the fullscreen tip was
-shown, lives in the store Claude Code keeps for each plugin.
+one process it starts is `git`, read-only, in the project: `git ls-files`
+for the filter's file list, and for the markers `git rev-parse
+--show-prefix --absolute-git-dir`, then `git status --porcelain=v1 -z
+--untracked-files=all --ignored=matching -- .`. Every run has
+`GIT_OPTIONAL_LOCKS=0`, so it never takes a lock a commit beside it needs
+or writes the index, the C locale, and a timeout. Its one stored value,
+whether the fullscreen tip was shown, lives in the store Claude Code keeps
+for each plugin.
 `claude plugin validate .` prints the same list from the source.
 
 The person's view (open folders, the previewed file, where each window
-stands, the filter's query) lives in `$.state`, so it survives a reload of
-the module; what was read from disk, the filter's file list among it, lives
-in the module and is read again as needed.
+stands, the filter's query) and the files Claude wrote this session live in
+`$.state`, so they survive a reload of the module and `/clear` starts
+afresh; what was read from disk, the filter's file list and git's status
+among it, lives in the module and is read again as needed.
 
 ## Develop
 
