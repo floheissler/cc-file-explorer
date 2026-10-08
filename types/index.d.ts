@@ -40,6 +40,11 @@ declare module 'claude-code' {
        */
       filter: string | null
       /**
+       * The in-file search's query: null while the search is not shown; a
+       * blank query marks nothing under the search's row.
+       */
+      search: string | null
+      /**
        * The files Claude wrote this session (Write, Edit, NotebookEdit), as
        * paths relative to the project root, the latest last.
        */

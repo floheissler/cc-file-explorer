@@ -45,32 +45,62 @@ describe('inlineLayoutOf', () => {
 
 describe('the filter’s row', () => {
   test('sits between the header and the tree, docked', async () => {
-    expect(paneLayoutOf(30, false, true)).toMatchObject({ treeRow: 2, treeRows: 28, previewRows: 0 })
+    expect(paneLayoutOf(30, false, { hasFilter: true })).toMatchObject({ treeRow: 2, treeRows: 28, previewRows: 0 })
 
-    const withPreview = paneLayoutOf(30, true, true)
+    const withPreview = paneLayoutOf(30, true, { hasFilter: true })
 
     expect(withPreview.treeRow).toBe(2)
     expect(withPreview.treeRow + withPreview.treeRows + 3 + withPreview.previewRows).toBe(30)
   })
 
   test('sits over an inline tree only', async () => {
-    expect(inlineLayoutOf(12, 'tree', 3, true)).toEqual({
+    expect(inlineLayoutOf(12, 'tree', 3, { hasFilter: true })).toEqual({
       bodyRows: 5,
       treeRow: 2,
       treeRows: 3,
       previewRow: 5,
       previewRows: 0,
     })
-    expect(inlineLayoutOf(12, 'tree', 50, true)).toMatchObject({ bodyRows: 12, treeRows: 10 })
-    expect(inlineLayoutOf(12, 'file', 5, true)).toMatchObject({ bodyRows: 6, previewRow: 1, previewRows: 5 })
+    expect(inlineLayoutOf(12, 'tree', 50, { hasFilter: true })).toMatchObject({ bodyRows: 12, treeRows: 10 })
+    expect(inlineLayoutOf(12, 'file', 5, { hasFilter: true })).toMatchObject({ bodyRows: 6, previewRow: 1, previewRows: 5 })
+  })
+})
+
+describe('the in-file search’s row', () => {
+  test('sits between the preview’s meta row and its text, docked', async () => {
+    const plain = paneLayoutOf(30, true)
+    const searched = paneLayoutOf(30, true, { hasSearch: true })
+
+    expect(searched.treeRow + searched.treeRows + 4 + searched.previewRows).toBe(30)
+    expect(searched.previewRows + searched.treeRows).toBe(plain.previewRows + plain.treeRows - 1)
+    expect(paneLayoutOf(30, false, { hasSearch: true })).toEqual(paneLayoutOf(30, false))
+  })
+
+  test('sits over an inline file only', async () => {
+    expect(inlineLayoutOf(12, 'file', 5, { hasSearch: true })).toEqual({
+      bodyRows: 7,
+      treeRow: 2,
+      treeRows: 0,
+      previewRow: 2,
+      previewRows: 5,
+    })
+    expect(inlineLayoutOf(12, 'file', 500, { hasSearch: true })).toMatchObject({ bodyRows: 12, previewRows: 10 })
+    expect(inlineLayoutOf(12, 'tree', 3, { hasSearch: true })).toEqual(inlineLayoutOf(12, 'tree', 3))
   })
 })
 
 describe('escapeStepOf', () => {
+  test('steps from a searched file to the file before the tree', async () => {
+    expect(escapeStepOf('file', { hasSearch: true })).toBe('unsearch')
+    expect(escapeStepOf('file', { hasSearch: true, hasFilter: true })).toBe('unsearch')
+    expect(escapeStepOf('tree', { hasSearch: true })).toBeNull()
+    expect(escapeStepOf('help', { hasSearch: true })).toBe('tree')
+  })
+
   test('steps from a filtered tree to the whole tree before closing', async () => {
-    expect(escapeStepOf('tree', true)).toBe('unfilter')
-    expect(escapeStepOf('file', true)).toBe('tree')
-    expect(escapeStepOf('help', true)).toBe('tree')
+    expect(escapeStepOf('tree', { hasFilter: true })).toBe('unfilter')
+    expect(escapeStepOf('file', { hasFilter: true })).toBe('tree')
+    expect(escapeStepOf('help', { hasFilter: true })).toBe('tree')
   })
 
   test('steps back from the file and the help to the tree, and closes from the tree', async () => {

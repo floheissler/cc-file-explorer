@@ -45,8 +45,10 @@ import {
   COMMAND_DESCRIPTION,
   filterKeyOf,
   FULLSCREEN_TIP_TEXT,
+  KEYS,
   PANE_TITLE,
   ROW_KEY_PREFIX,
+  searchKeyOf,
   TIP_SHOWN_KEY,
   WIDEN_TIP_TEXT,
 } from './names'
@@ -62,6 +64,15 @@ import {
 import { maxPreviewTop, previewHeightOf, sourceColumnsOf, type Preview } from './preview'
 import { findEntry, revealPathsOf, rowsRevealing } from './reveal'
 import { loadView, saveView } from './saved'
+import {
+  matchLinesOf,
+  searchQueryOf,
+  searchStatusOf,
+  stepMatchOf,
+  topShowingMatch,
+  type PreviewFit,
+  type SearchQuery,
+} from './search'
 import { NO_MARKS, treeMarksOf } from './status'
 import { messageOf, sanitize, truncateMiddle } from './text'
 import {
@@ -75,7 +86,7 @@ import {
   type PathSet,
   type TreeRow,
 } from './tree'
-import { helpHeightOf, paneView, type FilterModel, type PaneActions, type Seat } from './view'
+import { helpHeightOf, paneView, type FilterModel, type PaneActions, type SearchModel, type Seat } from './view'
 
 /**
  * The pane's id and the command that toggles it. The hooks' matchers spell
@@ -104,6 +115,7 @@ const PINNED = atom({ plugin: 'file-explorer', key: 'pinned' } as const, false)
 const MARKDOWN_MODE = atom({ plugin: 'file-explorer', key: 'markdownMode' } as const, 'rendered')
 const HELP_SHOWN = atom({ plugin: 'file-explorer', key: 'helpShown' } as const, false)
 const FILTER = atom({ plugin: 'file-explorer', key: 'filter' } as const, null)
+const SEARCH = atom({ plugin: 'file-explorer', key: 'search' } as const, null)
 
 /**
  * The files Claude wrote this session, which the tree marks: session state
@@ -119,14 +131,42 @@ type Drawn = {
   readonly rows: readonly TreeRow[]
   readonly layout: PaneLayout
   /**
-   * The cells across a row.
+   * The cells across a row the preview's text has: the row's, less the
+   * in-file search's marks beside a source preview.
    */
-  readonly columns: number
+  readonly textColumns: number
   /**
    * Whether the filter's row sat over the tree.
    */
   readonly hasFilter: boolean
+  /**
+   * Whether the in-file search's row sat over the preview.
+   */
+  readonly hasSearch: boolean
 }
+
+/**
+ * What a query matches in one read of a file: the matching lines, as a
+ * list and a set.
+ */
+type Found = {
+  readonly preview: Preview
+  readonly text: string
+  readonly query: SearchQuery
+  readonly lines: readonly number[]
+  readonly set: ReadonlySet<number>
+}
+
+const NO_MATCHES: ReadonlySet<number> = new Set()
+
+/**
+ * Why an inline pane's close was turned into a step back, by the step.
+ */
+const DENIALS = {
+  unsearch: 'back to the file',
+  tree: 'back to the tree',
+  unfilter: 'back to the whole tree',
+} as const
 
 /**
  * The tree a level step works on, the one the pane shows: its folders as
@@ -221,6 +261,12 @@ function hostOf($: EngineInterface): Host {
         get: () => read($, FILTER),
         set: async fn => {
           await update($, FILTER, fn)
+        },
+      },
+      search: {
+        get: () => read($, SEARCH),
+        set: async fn => {
+          await update($, SEARCH, fn)
         },
       },
       written: {
@@ -428,6 +474,67 @@ export const register: Register = on => {
   }
 
   /**
+   * The in-file search, beyond its query in the session state:
+   * - the text in its field, ahead of the query while typing pauses;
+   * - how many times Enter was pressed in the field, which keys the field;
+   * - what the last query matched in the last file read;
+   * - where the steps stand, in which file: the match they stand on, and
+   *   the line a query typed searches from, the top when the search opened
+   *   or the file showed, then each match stepped to. Another file starts
+   *   again from its top.
+   */
+  const searching = {
+    typed: null as string | null,
+    submits: 0,
+    debounce: null as Timer | null,
+    found: null as Found | null,
+    spot: null as { readonly path: string; readonly current: number | null; readonly origin: number } | null,
+  }
+
+  /**
+   * Leaves the search's own state: the field's text and where it stands.
+   */
+  const leaveSearch = () => {
+    searching.debounce?.cancel()
+    searching.debounce = null
+    searching.typed = null
+    searching.spot = null
+  }
+
+  /**
+   * What a query matches in a file as read, worked out once per query and
+   * read, as every drawing and step asks again.
+   *
+   * @returns what it matched, or null for a blank query
+   */
+  const foundIn = (shown: Preview, text: string): Found | null => {
+    const query = searchQueryOf(text)
+
+    if (query === null) {
+      return null
+    }
+
+    if (searching.found?.preview !== shown || searching.found.text !== text) {
+      const lines = matchLinesOf(shown, query)
+
+      searching.found = { preview: shown, text, query, lines, set: new Set(lines) }
+    }
+
+    return searching.found
+  }
+
+  /**
+   * The match the steps stand on in a file, while it still matches.
+   */
+  const currentMatchOf = (path: string, found: Found): number | null => {
+    const spot = searching.spot
+
+    return spot !== null && spot.path === path && spot.current !== null && found.set.has(spot.current)
+      ? spot.current
+      : null
+  }
+
+  /**
    * Git's view of the tree as last read, null where the root is in no
    * repository or git failed; the read under way, one at a time, and
    * whether another was asked for meanwhile; and whether what is held is
@@ -458,6 +565,8 @@ export const register: Register = on => {
     polling.cursor = 0
     dropFileList()
     leaveFilter()
+    leaveSearch()
+    searching.found = null
     isGitStale = true
   }
 
@@ -940,12 +1049,17 @@ export const register: Register = on => {
   }
 
   /**
-   * Closes the preview, inline back to the tree, and lets go of its pin: the
-   * next file previewed follows the ring again.
+   * Closes the preview, inline back to the tree, with its search, and lets
+   * go of its pin: the next file previewed follows the ring again.
    */
   const closePreview = async (host: Host) => {
     isFileShown = false
-    await Promise.all([host.state.selected.set(() => null), host.state.pinned.set(() => false)])
+    leaveSearch()
+    await Promise.all([
+      host.state.selected.set(() => null),
+      host.state.pinned.set(() => false),
+      host.state.search.set(() => null),
+    ])
     await queueSave(host)
   }
 
@@ -965,7 +1079,8 @@ export const register: Register = on => {
       return
     }
 
-    const { treeRows } = paneLayoutOf(layout.bodyRows, hasPreview, drawn.hasFilter)
+    const hasSearch = hasPreview && (await host.state.search.get()) !== null
+    const { treeRows } = paneLayoutOf(layout.bodyRows, hasPreview, { hasFilter: drawn.hasFilter, hasSearch })
 
     await host.state.treeTop.set(top => topRevealing(index, top, rows.length, treeRows))
   }
@@ -978,7 +1093,13 @@ export const register: Register = on => {
    * in a tree of `MIN_TREE_ROWS` rows or more, the markers of the rows out
    * of view included.
    */
-  const revealTopOf = (rows: readonly TreeRow[], index: number, top: number, hasPreview: boolean): number => {
+  const revealTopOf = (
+    rows: readonly TreeRow[],
+    index: number,
+    top: number,
+    hasPreview: boolean,
+    hasSearch: boolean,
+  ): number => {
     if (index < 0) {
       return top
     }
@@ -988,7 +1109,9 @@ export const register: Register = on => {
     }
 
     const { treeRows } =
-      seat.placement === 'inline' ? inlineLayoutOf(room, 'tree', rows.length) : paneLayoutOf(room, hasPreview)
+      seat.placement === 'inline'
+        ? inlineLayoutOf(room, 'tree', rows.length)
+        : paneLayoutOf(room, hasPreview, { hasSearch: hasPreview && hasSearch })
 
     return topRevealing(index, top, rows.length, treeRows)
   }
@@ -1022,11 +1145,12 @@ export const register: Register = on => {
     }
 
     const hasPreview = (await host.state.selected.get()) !== null
+    const hasSearch = (await host.state.search.get()) !== null
 
     isFileShown = !isDir
     revealed = entry.path
     await setExpanded(host, () => expanded)
-    await host.state.treeTop.set(top => revealTopOf(rows, index, top, hasPreview))
+    await host.state.treeTop.set(top => revealTopOf(rows, index, top, hasPreview, hasSearch))
   }
 
   /**
@@ -1095,23 +1219,120 @@ export const register: Register = on => {
     await host.state.treeTop.set(top => clamp(Math.min(top, max) + by, 0, max))
   }
 
-  const scrollPreviewBy = async (host: Host, by: number) => {
-    if (drawn === null || preview === null) {
-      return
+  /**
+   * How the preview's window drew a file at the last drawing: its rows,
+   * whether as source lines, and the cells a source row has beside its
+   * gutter; null before the pane drew.
+   */
+  const previewFitOf = async (host: Host, shown: Preview): Promise<PreviewFit | null> => {
+    if (drawn === null) {
+      return null
     }
 
     const isSource =
-      preview.kind === 'code' ||
-      (preview.kind === 'markdown' && (await host.state.markdownMode.get()) === 'source')
+      shown.kind === 'code' || (shown.kind === 'markdown' && (await host.state.markdownMode.get()) === 'source')
 
-    const textColumns =
-      preview.kind === 'code' || preview.kind === 'markdown'
-        ? sourceColumnsOf(preview.lines.length, drawn.columns)
+    const columns =
+      shown.kind === 'code' || shown.kind === 'markdown'
+        ? sourceColumnsOf(shown.lines.length, drawn.textColumns)
         : undefined
 
-    const max = maxPreviewTop(preview, drawn.layout.previewRows, isSource, textColumns)
+    return { rows: drawn.layout.previewRows, isSource, ...(columns === undefined ? {} : { columns }) }
+  }
+
+  const scrollPreviewBy = async (host: Host, by: number) => {
+    const shown = preview
+    const fit = shown === null ? null : await previewFitOf(host, shown)
+
+    if (shown === null || fit === null) {
+      return
+    }
+
+    const max = maxPreviewTop(shown, fit.rows, fit.isSource, fit.columns)
 
     await host.state.previewTop.set(top => clamp(Math.min(top, max) + by, 0, max))
+  }
+
+  /**
+   * The file the search works on: the previewed file as read, null while it
+   * is read.
+   */
+  const searchedPreview = async (host: Host): Promise<Preview | null> => {
+    const selected = await host.state.selected.get()
+
+    return preview !== null && preview.path === selected ? preview : null
+  }
+
+  /**
+   * The line a query typed searches from in a file: where the steps stand
+   * in it, else the window's top.
+   */
+  const searchOriginOf = async (host: Host, shown: Preview): Promise<number> =>
+    searching.spot?.path === shown.path ? searching.spot.origin : host.state.previewTop.get()
+
+  /**
+   * Stands the steps on a match, or on none, and moves the preview's window
+   * to show it; a query typed next searches from `origin`.
+   */
+  const goToMatch = async (host: Host, shown: Preview, line: number | null, origin: number) => {
+    searching.spot = { path: shown.path, current: line, origin }
+
+    const fit = line === null ? null : await previewFitOf(host, shown)
+    const top = await host.state.previewTop.get()
+    const next = line === null || fit === null ? top : topShowingMatch(shown, line, top, fit)
+
+    // The marks move with the match even where the window stays
+    if (next === top) {
+      host.invalidate()
+    } else {
+      await host.state.previewTop.set(() => next)
+    }
+  }
+
+  /**
+   * Makes the preview show a query's first match from where the search
+   * stands: the search's query in the session state, and the window moved
+   * to the match. A search closed meanwhile stays shut.
+   */
+  const applySearch = async (host: Host, text: string) => {
+    const before = await host.state.search.get()
+
+    if (before === null) {
+      return
+    }
+
+    if (before !== text) {
+      await host.state.search.set(query => (query === null ? null : text))
+    }
+
+    const shown = await searchedPreview(host)
+
+    if (shown === null) {
+      return
+    }
+
+    const origin = await searchOriginOf(host, shown)
+    const found = foundIn(shown, text)
+
+    await goToMatch(host, shown, found === null ? null : stepMatchOf(found.lines, origin - 1, 1), origin)
+  }
+
+  /**
+   * Closes the search. A ring on its row, which goes, lands on the
+   * previewed file's row where the tree shows it.
+   */
+  const closeSearch = async (host: Host) => {
+    const wasOnRow = lastFocused?.startsWith('search-') === true
+
+    leaveSearch()
+    await host.state.search.set(() => null)
+
+    const selected = await host.state.selected.get()
+    const row = `${ROW_KEY_PREFIX}${selected ?? ''}`
+
+    if (wasOnRow && selected !== null && seat.placement === 'dock' && focusOrder.shown.includes(row)) {
+      await focusOn(host, row)
+    }
   }
 
   /**
@@ -1356,6 +1577,8 @@ export const register: Register = on => {
 
   const focusField = (host: Host) => focusOn(host, filterKeyOf(filtering.submits))
 
+  const focusSearchField = (host: Host) => focusOn(host, searchKeyOf(searching.submits))
+
   /**
    * Makes the tree show a query's matches: the filter's query in the session
    * state, and the tree's window at its top for a new query, or where the
@@ -1418,7 +1641,7 @@ export const register: Register = on => {
     const index = rows.findIndex(row => row.type === 'entry' && row.path === path)
 
     if (index >= 0 && drawn !== null && seat.placement === 'dock') {
-      const { treeRows } = paneLayoutOf(drawn.layout.bodyRows, true)
+      const { treeRows } = paneLayoutOf(drawn.layout.bodyRows, true, { hasSearch: drawn.hasSearch })
 
       await host.state.treeTop.set(() => topRevealing(index, filtering.treeTopBefore, rows.length, treeRows))
     }
@@ -1628,12 +1851,105 @@ export const register: Register = on => {
       const index = shown.rows.findIndex(row => row.type === 'entry' && row.path === first)
 
       if (drawn !== null && seat.placement === 'dock') {
-        const { treeRows } = paneLayoutOf(drawn.layout.bodyRows, drawn.layout.previewRows > 0, true)
+        const { treeRows } = paneLayoutOf(drawn.layout.bodyRows, drawn.layout.previewRows > 0, {
+          hasFilter: true,
+          hasSearch: drawn.hasSearch,
+        })
 
         await host.state.treeTop.set(top => topRevealing(index, top, shown.rows.length, treeRows))
       }
 
       await focusOn(host, `${ROW_KEY_PREFIX}${first}`)
+    },
+
+    toggleSearch: async () => {
+      // The person turns to the search: a revealed row no longer starts the ring
+      revealed = null
+
+      if ((await host.state.search.get()) !== null) {
+        await closeSearch(host)
+
+        return
+      }
+
+      leaveSearch()
+      searching.typed = ''
+
+      await host.state.helpShown.set(() => false)
+      await host.state.search.set(() => '')
+      await focusSearchField(host)
+    },
+
+    typeSearch: async text => {
+      searching.typed = text
+      searching.debounce?.cancel()
+      searching.debounce = host.after(Limits.SEARCH_DEBOUNCE_MS, () => {
+        searching.debounce = null
+        void applySearch(host, text).catch(() => undefined)
+      })
+    },
+
+    submitSearch: async text => {
+      searching.debounce?.cancel()
+      searching.debounce = null
+      searching.typed = text
+
+      // Claude Code empties the field on Enter: the next one is drawn
+      // holding the query
+      searching.submits += 1
+
+      if (searchQueryOf(text) === null) {
+        await closeSearch(host)
+
+        return
+      }
+
+      await applySearch(host, text)
+
+      const shown = await searchedPreview(host)
+
+      if (shown === null || searching.spot?.path !== shown.path || searching.spot.current === null) {
+        await focusSearchField(host)
+
+        return
+      }
+
+      // The match found stays, and the ring waits on the next step, where
+      // Enter steps on; a row too narrow to label the step keeps the ring
+      // in the field
+      await focusOn(host, KEYS.searchNext)
+
+      if (!focusOrder.shown.includes(KEYS.searchNext)) {
+        await focusSearchField(host)
+      }
+    },
+
+    stepSearch: async direction => {
+      // A step reads what was typed, even before typing paused
+      if (searching.debounce !== null && searching.typed !== null) {
+        searching.debounce.cancel()
+        searching.debounce = null
+        await applySearch(host, searching.typed)
+      }
+
+      const [shown, text, top] = await Promise.all([
+        searchedPreview(host),
+        host.state.search.get(),
+        host.state.previewTop.get(),
+      ])
+
+      const found = shown === null || text === null ? null : foundIn(shown, text)
+
+      if (shown === null || found === null || found.lines.length === 0) {
+        return
+      }
+
+      // From the match the steps stand on, else from the window's top
+      const current = currentMatchOf(shown.path, found)
+      const from = current ?? (direction > 0 ? top - 1 : top)
+      const line = stepMatchOf(found.lines, from, direction)
+
+      await goToMatch(host, shown, line, line ?? top)
     },
 
     // The prompt box takes the keyboard as it takes the text, so the person
@@ -1736,12 +2052,14 @@ export const register: Register = on => {
       await restoreView(host).catch(() => undefined)
     }
 
-    // A pane opens on the whole tree: a file shown inline, the help, or a
-    // filter is left. `/tree <path>` reveals in the whole tree too: a shown
-    // pane closes its filter as `f` does, and keeps what it read and git's
-    // markers, which its refreshes and polls keep fresh
+    // A pane opens on the whole tree: a file shown inline, the help, a
+    // filter or a search is left. `/tree <path>` reveals in the whole tree
+    // too: a shown pane closes its filter as `f` does, and keeps what it
+    // read and git's markers, which its refreshes and polls keep fresh, and
+    // its search, which then searches the file revealed
     if (!isShown) {
       forget()
+      await update($, SEARCH, () => null)
     } else if ((await host.state.filter.get()) !== null) {
       await closeFilter(host)
     }
@@ -1785,7 +2103,7 @@ export const register: Register = on => {
     const host = hostOf($)
     const { Box, Text, Button, Code, Markdown, Input } = $.ui.resolve(e)
 
-    const [expanded, selected, treeTop, previewTop, isPinned, markdownMode, helpShown, filterText, written] =
+    const [expanded, selected, treeTop, previewTop, isPinned, markdownMode, helpShown, filterText, searchText, written] =
       await Promise.all([
         read($, EXPANDED),
         read($, SELECTED),
@@ -1795,6 +2113,7 @@ export const register: Register = on => {
         read($, MARKDOWN_MODE),
         read($, HELP_SHOWN),
         read($, FILTER),
+        read($, SEARCH),
         read($, WRITTEN),
       ])
 
@@ -1869,12 +2188,14 @@ export const register: Register = on => {
     const inlineView = seat.placement === 'inline' ? inlineViewOf({ helpShown, isFileShown, selected }) : null
 
     // The filter's row sits over the tree, whole or filtered; the help and an
-    // inline file view stand in for both
+    // inline file view stand in for both. The search's row sits over the
+    // preview, docked or inline
     const hasFilter = filterText !== null && !helpShown && inlineView !== 'file'
+    const hasSearch = searchText !== null && !helpShown && (inlineView === null ? selected !== null : inlineView === 'file')
 
     const layout =
       inlineView === null
-        ? paneLayoutOf(e.props.scroll.bodyRows, selected !== null, hasFilter)
+        ? paneLayoutOf(e.props.scroll.bodyRows, selected !== null, { hasFilter, hasSearch })
         : inlineLayoutOf(
             e.props.scroll.bodyRows,
             inlineView,
@@ -1883,14 +2204,20 @@ export const register: Register = on => {
               : inlineView === 'file'
                 ? previewHeightOf(shownPreview)
                 : helpHeightOf(seat, columns),
-            hasFilter,
+            { hasFilter, hasSearch },
           )
 
     const window = treeWindowOf(rows.length, treeTop, layout.treeRows)
 
+    // A source preview gives the search's marks their cells while it shows
+    const isSourceShown =
+      shownPreview?.kind === 'code' || (shownPreview?.kind === 'markdown' && markdownMode === 'source')
+
+    const textColumns = Math.max(1, columns - (hasSearch && isSourceShown ? Limits.SEARCH_MARK_CELLS : 0))
+
     // The help view stands in for the tree: the scroll and focus hooks then
     // have no rows to steer
-    drawn = helpShown ? null : { rows, layout, columns, hasFilter }
+    drawn = helpShown ? null : { rows, layout, textColumns, hasFilter, hasSearch }
 
     // The field holds what was typed, ahead of the query while typing pauses
     const filter: FilterModel | null =
@@ -1901,6 +2228,24 @@ export const register: Register = on => {
             value: filtering.typed ?? filterText,
             status: queryOf(filterText) === null ? '' : filterStatusOf(shown.view),
             isBlank: queryOf(filtering.typed ?? filterText) === null,
+          }
+
+    // The search marks what its query matches in the file shown, and the
+    // match the steps stand on while it still matches
+    const found = hasSearch && shownPreview !== null && searchText !== null ? foundIn(shownPreview, searchText) : null
+    const match = found === null || shownPreview === null ? null : currentMatchOf(shownPreview.path, found)
+
+    const search: SearchModel | null =
+      !hasSearch || searchText === null
+        ? null
+        : {
+            key: searchKeyOf(searching.submits),
+            value: searching.typed ?? searchText,
+            status: shownPreview === null ? '' : searchStatusOf(found?.lines ?? null, match),
+            isBlank: searchQueryOf(searching.typed ?? searchText) === null,
+            query: found?.query ?? null,
+            matches: found?.set ?? NO_MATCHES,
+            current: match,
           }
 
     const tree = paneView(
@@ -1923,6 +2268,7 @@ export const register: Register = on => {
         markdownMode,
         helpShown,
         filter,
+        search,
         mentioned: ringReturn,
       },
     )
@@ -2031,11 +2377,12 @@ export const register: Register = on => {
   /**
    * The pane closing, by `/tree`, its close mark or a key: the polls stop.
    * Inline, the person's close steps back first, as Claude Code's own
-   * dialogs do: from the file or the help to the tree, from a filtered tree
-   * (Esc in the filter's field, under the classic renderer) to the whole
-   * tree; the pane opens again with the keyboard, and the picked file's row
-   * takes the focus ring. No `.catch`: a throw of `next` passes on as it
-   * came, never run twice.
+   * dialogs do: from a searched file to the file (Esc in the search's field,
+   * under the classic renderer), from the file or the help to the tree, from
+   * a filtered tree (Esc in the filter's field) to the whole tree; the pane
+   * opens again with the keyboard, and the picked file's row takes the focus
+   * ring. No `.catch`: a throw of `next` passes on as it came, never run
+   * twice.
    */
   on('ui.close', { id: 'file-explorer' }, async ($, e, next) => {
     if (e.origin.kind === 'person' && seat.placement === 'inline') {
@@ -2045,19 +2392,27 @@ export const register: Register = on => {
         selected: await read($, SELECTED),
       })
 
-      const step = escapeStepOf(view, (await read($, FILTER)) !== null)
+      const step = escapeStepOf(view, {
+        hasFilter: (await read($, FILTER)) !== null,
+        hasSearch: (await read($, SEARCH)) !== null,
+      })
 
       if (step !== null) {
-        if (step === 'unfilter') {
-          await closeFilter(hostOf($)).catch(() => undefined)
+        if (step === 'unsearch') {
+          await closeSearch(hostOf($)).catch(() => undefined)
+        } else {
+          if (step === 'unfilter') {
+            await closeFilter(hostOf($)).catch(() => undefined)
+          }
+
+          isFileShown = false
+          await update($, HELP_SHOWN, () => false)
         }
 
-        isFileShown = false
-        await update($, HELP_SHOWN, () => false)
         hostOf($).invalidate()
         void $.ui.open(paneArgsOf(seat.isClassic)).catch(() => undefined)
 
-        return { deny: step === 'unfilter' ? 'back to the whole tree' : 'back to the tree' }
+        return { deny: DENIALS[step] }
       }
     }
 

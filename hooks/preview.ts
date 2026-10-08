@@ -299,8 +299,12 @@ export function maxPreviewTop(
 
 /**
  * The rows one source line takes, wrapped to the room beside the gutter.
+ *
+ * @param line the line, as drawn
+ * @param columns the cells a row has beside the gutter
+ * @returns the rows, at least one
  */
-function rowsOfLine(line: string, columns: number): number {
+export function rowsOfLine(line: string, columns: number): number {
   return Math.max(1, Math.ceil(cellWidth(line) / Math.max(1, columns)))
 }
 
@@ -429,22 +433,39 @@ export function markdownWindowOf(
 
 /**
  * One cell of a Markdown table: cut to the cell cap in terminal columns, its
- * pipes escaped.
+ * pipes escaped; bold when marked, its asterisks escaped so they stay text.
  */
-function tableCellOf(cell: string): string {
+function tableCellOf(cell: string, isBold = false): string {
   const cut = truncateEnd(cell, Limits.MAX_CELL_COLUMNS)
 
-  return cut === '' ? ' ' : cut.replace(/\\/g, '\\\\').replace(/\|/g, '\\|')
+  if (cut === '') {
+    return ' '
+  }
+
+  const escaped = cut.replace(/\\/g, '\\\\').replace(/\|/g, '\\|')
+
+  return isBold ? `**${escaped.replace(/\*/g, '\\*')}**` : escaped
+}
+
+/**
+ * A body row of a table window whose cells the in-file search marks: the
+ * row, counted as `top` counts, and which of its cells hold the match.
+ */
+export type TableMark = {
+  readonly row: number
+  readonly isMatch: (cell: string) => boolean
 }
 
 /**
  * The Markdown table a CSV or TSV window from `top` draws: the header row,
- * then up to `count` rows from `top`, every row as wide as the widest.
+ * then up to `count` rows from `top`, every row as wide as the widest; a
+ * marked row's matching cells bold.
  */
 export function tableWindowOf(
   rows: readonly (readonly string[])[],
   top: number,
   count: number,
+  mark?: TableMark,
 ): string {
   const head = rows[0] ?? []
   const body = rows.slice(1)
@@ -452,10 +473,17 @@ export function tableWindowOf(
   const shown = body.slice(start, start + count)
   const width = shown.reduce((widest, row) => Math.max(widest, row.length), Math.max(1, head.length))
 
-  const lineOf = (cells: readonly string[]) =>
-    `| ${Array.from({ length: width }, (_, at) => tableCellOf(cells[at] ?? '')).join(' | ')} |`
+  const lineOf = (cells: readonly string[], row: number | null = null) => {
+    const isMarked = mark !== undefined && row === mark.row
+
+    return `| ${Array.from({ length: width }, (_, at) => {
+      const cell = cells[at] ?? ''
+
+      return tableCellOf(cell, isMarked && mark.isMatch(cell))
+    }).join(' | ')} |`
+  }
 
   const rule = `| ${Array.from({ length: width }, () => '---').join(' | ')} |`
 
-  return [lineOf(head), rule, ...shown.map(lineOf)].join('\n')
+  return [lineOf(head), rule, ...shown.map((cells, at) => lineOf(cells, start + at))].join('\n')
 }

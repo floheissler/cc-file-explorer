@@ -3,7 +3,7 @@ import { describe, expect, test, type Engine } from 'claude-code/testing'
 
 import { hotkeysOf, markersOf, overflowsOf } from './drawn'
 import { testPathOf } from './host'
-import { filterKeyOf } from '../hooks/names'
+import { filterKeyOf, searchKeyOf } from '../hooks/names'
 import { maxPreviewTop, previewOf, sourceColumnsOf } from '../hooks/preview'
 
 const ROOT = '/work/an-unusually-long-project-folder-name'
@@ -122,12 +122,13 @@ const WIDTHS = [16, 24, 32, 40, 60, 120] as const
 
 /**
  * Each view the sweep draws, reached from the tree by presses, then a query
- * submitted in the filter, then presses again.
+ * submitted in the filter or the in-file search, then presses again.
  */
 const VIEWS: readonly {
   readonly name: string
   readonly presses: readonly string[]
   readonly query?: string
+  readonly search?: string
   readonly then?: readonly string[]
   /**
    * An element the view draws, by key, so the sweep checks the view it
@@ -157,6 +158,26 @@ const VIEWS: readonly {
   },
   { name: 'filtered, no match', presses: ['filter'], query: 'nothing-is-called-this', shows: filterKeyOf(1) },
   { name: 'filtered preview', presses: ['filter'], query: 'readme', then: ['row:README.md'], shows: filterKeyOf(1) },
+  { name: 'search', presses: ['row:main-with-a-rather-long-name.ts', 'search'], shows: searchKeyOf(0) },
+  {
+    name: 'searched code',
+    presses: ['row:main-with-a-rather-long-name.ts', 'search'],
+    search: 'value1',
+    shows: 'search-next',
+  },
+  {
+    name: 'searched Markdown source',
+    presses: ['row:README.md', 'preview-mode', 'search'],
+    search: 'words',
+    shows: 'search-next',
+  },
+  { name: 'searched table', presses: ['row:data.csv', 'search'], search: 'beta', shows: 'search-next' },
+  {
+    name: 'searched, no match',
+    presses: ['row:main-with-a-rather-long-name.ts', 'search'],
+    search: 'nothing-is-called-this',
+    shows: searchKeyOf(1),
+  },
 ]
 
 const SEATS = [
@@ -196,6 +217,10 @@ describe('rows fit the body at every width', () => {
 
         if (view.query !== undefined) {
           await ui.input({ key: filterKeyOf(0), text: view.query })
+        }
+
+        if (view.search !== undefined) {
+          await ui.input({ key: searchKeyOf(0), text: view.search })
         }
 
         for (const key of view.then ?? []) {

@@ -89,6 +89,18 @@ describe('preview windows', () => {
     expect(tableWindowOf(rows, 0, 1)).toContain('a\\|b')
   })
 
+  test('bolds the marked row’s matching cells, their asterisks kept as text', async () => {
+    const rows = [['id', 'note'], ['1', 'a*b'], ['2', 'a*b']]
+    const mark = { row: 1, isMatch: (cell: string) => cell.includes('*') }
+
+    expect(tableWindowOf(rows, 0, 5, mark).split('\n')).toEqual([
+      '| id | note |',
+      '| --- | --- |',
+      '| 1 | a*b |',
+      '| 2 | **a\\*b** |',
+    ])
+  })
+
   test('lets source scroll until its last line reaches the bottom', async () => {
     const code = previewOf('a.ts', 1, lines.join('\n'))
 

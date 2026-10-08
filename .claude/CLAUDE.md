@@ -19,6 +19,10 @@ entry with `"source": "./"`). README.md has the user-facing behavior.
   filter's file list: `git ls-files` in a work tree, else a bounded walk.
 - `hooks/filter.ts`: pure logic of the filter (`f`): reading git's output,
   matching a query, and the filtered tree drawn from the real listings.
+- `hooks/search.ts`: pure logic of the in-file search (`g`): smart case,
+  the matching lines, the steps around the ends, the window that shows a
+  match (`topShowingMatch`), and the marks beside a source's rows
+  (`windowMarksOf`).
 - `hooks/git.ts`: every git run, through `runGit` (`GIT_ENV`, the timeout):
   the filter's `ls-files` (called from `listing.ts`), and for the markers
   where the root sits in its repository, the stamps of its index and HEAD,
@@ -50,9 +54,9 @@ entry with `"source": "./"`). README.md has the user-facing behavior.
 - `hooks/view.tsx`: draws the pane from a `PaneModel`.
 - `types/index.d.ts`: the `$.state` contract (`PluginState['file-explorer']`).
 - `tests/`: `claude plugin test` suites; `pane.test.ts` mounts the pane on the
-  terminal and desktop surfaces with a stubbed file system, and
-  `filtering.test.ts` the filter and `git.test.ts` the markers with git
-  stubbed too. An unstubbed `process.run` rejects, as git missing does: the
+  terminal and desktop surfaces with a stubbed file system,
+  `searching.test.ts` the in-file search, and `filtering.test.ts` the filter
+  and `git.test.ts` the markers with git stubbed too. An unstubbed `process.run` rejects, as git missing does: the
   other suites draw no git markers. A stub answers by `argv[1]`
   (`ls-files`, `rev-parse`, `status`), as both features run git.
 - `ROADMAP.md` (gitignored, local): the working plan toward a publishable
@@ -103,8 +107,9 @@ the module otherwise:
 - Every open goes through `paneArgsOf` (focus, `rows`, `closeOnEscape` under
   the classic renderer), as each `$.ui.open` sets them all anew.
 - Inline, a person's close (Esc, the close mark, Ctrl+X X) steps back first:
-  the `ui.close` hook answers `{ deny }`, shows the tree (from a filtered
-  tree, the whole tree), and opens the pane again; the picked file's row (or
+  the `ui.close` hook answers `{ deny }`, shows the tree (from a searched
+  file, the file without its search; from a filtered tree, the whole tree),
+  and opens the pane again; the picked file's row (or
   the revealed one) has `autoFocus`, so the ring lands on it. The test kit cannot raise a person's
   close (`$.ui.close` is undefined there), so `escapeStepOf` carries the
   decision and is tested pure.
@@ -115,6 +120,29 @@ the module otherwise:
   folded (`foldKey`), so rows keep `$.fs.list`'s spelling and keys. The
   level keys and folder presses work on the tree in view (`shownFoldersOf`),
   and leave the whole tree's open folders as they were.
+- The in-file search (`g`, in the preview's row): its query is `$.state`
+  (`search`, null while hidden); what it matched and where the steps stand
+  (`searching.spot`: the file, the current match, the line a query typed
+  searches from) are the module's. A match is a whole line (a table's body
+  row), and the steps go line by line: `Code` is a leaf whose colors are the
+  engine's, so a mod cannot highlight a word in it. A column of
+  `SEARCH_MARK_CELLS` left of a source marks each matching line's rows, so
+  the source loses that cell (`Drawn.textColumns`). The marks count rows as
+  Claude Code wraps them: its `Code` draws through a native highlighter that
+  returns one entry per drawn row, beside a gutter as wide as the window's
+  last line number plus 2 (read in 2.1.294's source), and wraps by
+  character, mid-word (checked live on 2.1.294); `windowMarksOf` takes the
+  cells from `sourceColumnsOf` of that line. A table bolds the current row's
+  matching cells in the Markdown the mod writes (`TableMark`), and takes two
+  rows per body row, as Claude Code rules off every row (checked live); rendered
+  Markdown has no row a line maps to, so it scrolls to the match unmarked.
+  Its field is re-keyed per Enter as the filter's is (`searchKeyOf`). Enter
+  keeps the match and moves the ring onto `search-next`, so Enter steps on;
+  `n`/`b` are drawn only while there are matches. The arrows cannot step: a
+  hotkey is a letter or digit, a Button's `action` presses only on chords or
+  modified keys from the prompt, and `ui.focus`/`ui.scroll` do not say which
+  key moved them. Closing the preview closes the search; another file keeps
+  the query and starts from its top. A fresh `/tree` starts without it.
 - The filter's list comes from `git ls-files`, run through `runGit` as
   every git call is (see the git bullet below), with `-z`; its paths are
   relative to the root and `/`-separated on every platform.
@@ -232,7 +260,8 @@ the module otherwise:
   full width.
 - A source preview wraps long lines, so its scroll end counts wrapped rows:
   `sourceColumnsOf` takes the gutter (a cell, the right-aligned digits, a
-  cell, checked live on 2.1.294) from the row.
+  cell, checked live on 2.1.294) from the row, and the search's marks
+  column too while it shows.
 - A tree row is a dim `Text` of branch lines (`branchPrefixOf`, from the
   `guides`/`isLast` that `flattenTree` computes) beside a `Button` keyed
   `row:<path>` for the glyph and name; the `ui.focus` hook relies on the key.
