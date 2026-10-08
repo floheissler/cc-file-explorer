@@ -99,7 +99,7 @@ name.
 | Platform | Status |
 | --- | --- |
 | Linux, WSL2 | Tested with Claude Code 2.1.294 |
-| Windows | Not tested yet. Drive roots (`C:\`), shares (`\\server\share`) and WSL's share (`\\wsl.localhost\…`) are covered by tests; a smoke test on native Windows is pending |
+| Windows | Smoke-tested on native Windows (2026-10-08). Drive roots (`C:\`), shares (`\\server\share`) and WSL's share (`\\wsl.localhost\…`) are covered by tests |
 | macOS | Not tested. Paths are POSIX, as on Linux, and composed and decomposed accents in names both draw |
 
 Known limits:
