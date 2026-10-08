@@ -8,9 +8,10 @@ entry with `"source": "./"`). README.md has the user-facing behavior.
 ## Layout
 
 - `.claude-plugin/plugin.json`: the manifest. `types` names the state contract.
-  `displayName` and `supportUrl` are for Anthropic's directory listing;
-  `supportUrl` and the directory's other listing fields go here only, as
-  `marketplace.json` entries don't take them.
+  `displayName`, `supportUrl` and `icon` (`assets/icon.svg`) are for
+  Anthropic's directory listing; `supportUrl`, `icon` and the directory's
+  other listing fields go here only, as `marketplace.json` entries don't
+  take them.
 - `.claude/CLAUDE.md`: this file. It lives under `.claude/` because a
   `CLAUDE.md` at the plugin root fails `claude plugin validate --strict`.
 - `.claude-plugin/marketplace.json`: makes the repo installable with

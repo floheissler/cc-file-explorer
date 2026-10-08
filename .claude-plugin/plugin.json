@@ -9,6 +9,7 @@
   "homepage": "https://github.com/floheissler/cc-file-explorer",
   "repository": "https://github.com/floheissler/cc-file-explorer",
   "supportUrl": "https://github.com/floheissler/cc-file-explorer/issues",
+  "icon": "./assets/icon.svg",
   "license": "MIT",
   "keywords": ["files", "explorer", "file-tree", "preview", "markdown", "csv", "pane", "mod"],
   "types": "./types/index.d.ts"
