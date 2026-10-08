@@ -23,6 +23,12 @@ declare module 'claude-code' {
        * The first line (or table row) the preview's window shows.
        */
       previewTop: number
+      /**
+       * Whether the preview keeps its file as the focus ring moves: else,
+       * docked, it shows each file the ring lands on. Closing the preview
+       * lets go of the pin.
+       */
+      pinned: boolean
       markdownMode: MarkdownMode
       /**
        * Whether the help view stands in for the tree and the preview.

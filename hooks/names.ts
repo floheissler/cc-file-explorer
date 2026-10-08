@@ -49,6 +49,7 @@ export const KEYS = {
   previewUp: 'preview-up',
   previewDown: 'preview-down',
   previewMode: 'preview-mode',
+  previewPin: 'preview-pin',
   previewClose: 'preview-close',
 } as const
 

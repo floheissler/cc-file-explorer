@@ -207,6 +207,40 @@ describe('an inline pane', () => {
     await ui.unmount()
   })
 
+  test('keeps the picked file as the ring walks the tree, with no preview beside it to follow', async ($, on) => {
+    projectOf(on, ['README.md', 'a.txt'])
+    on('ui.focus', () => ({}))
+    await treeIn($, CLASSIC)
+
+    const ui = await $.ui.mount(INLINE)
+
+    // The file view has nothing to pin: nothing follows the ring here
+    await ui.press({ key: 'row:README.md' })
+    expect(await ui.find({ key: 'preview-pin' })).toBeUndefined()
+
+    await treeIn($, CLASSIC)
+    await treeIn($, CLASSIC)
+    await ui.redraw()
+    await $.ui.focus({
+      component: 'Pane',
+      requestId: 'file-explorer',
+      plugin: 'file-explorer',
+      element: 'row:a.txt',
+      origin: { kind: 'person' },
+    })
+
+    for (let turn = 0; turn < 10; turn += 1) {
+      await ui.redraw()
+    }
+
+    // Docked, the picked file shows beside the tree, and can be pinned
+    await ui.redraw({ ...INLINE.props, placement: 'dock', bodyColumns: 60, scroll: { offset: 0, bodyRows: 30 } })
+    expect(await ui.find({ type: 'Markdown' })).toBeDefined()
+    expect(await ui.find({ type: 'Code' })).toBeUndefined()
+    expect(await ui.find({ key: 'preview-pin' })).toMatchObject({ props: { label: 'pin' } })
+    await ui.unmount()
+  })
+
   test('shows help without the mouse, with the fullscreen tip, at its natural height', async ($, on) => {
     projectOf(on, ['a.txt'])
     await treeIn($, CLASSIC)
