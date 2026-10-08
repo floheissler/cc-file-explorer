@@ -1,0 +1,2 @@
+# The repo lives on the Windows side: keep LF whatever tool touches a file
+* text=auto eol=lf

@@ -1,0 +1,14 @@
+{
+  "name": "cc-file-explorer",
+  "description": "The file-explorer mod for Claude Code: a file tree and preview pane beside the conversation",
+  "owner": {
+    "name": "Flo Heissler"
+  },
+  "plugins": [
+    {
+      "name": "file-explorer",
+      "source": "./",
+      "description": "A file explorer pane beside the conversation: a collapsible tree that respects .gitignore, with Markdown, CSV and text previews."
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "file-explorer",
+  "version": "0.1.0",
+  "description": "A file explorer pane beside the conversation: browse the project as a collapsible tree that respects .gitignore, and preview Markdown, CSV and text files without leaving Claude Code.",
+  "author": {
+    "name": "Flo Heissler"
+  },
+  "homepage": "https://github.com/floheissler/cc-file-explorer",
+  "repository": "https://github.com/floheissler/cc-file-explorer",
+  "license": "MIT",
+  "keywords": ["files", "explorer", "file-tree", "preview", "markdown", "csv", "pane", "mod"],
+  "types": "./types/index.d.ts"
+}
