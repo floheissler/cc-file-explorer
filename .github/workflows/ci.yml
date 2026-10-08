@@ -40,20 +40,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # The native installer, as https://code.claude.com/docs/en/setup
-      # recommends; it installs the latest release.
+      # The npm package installs the same native binary as the native
+      # installer (https://code.claude.com/docs/en/setup#install-with-npm), on
+      # every runner alike, and keeps a download piped into a shell out of the
+      # plugin folder, which Anthropic's directory flags in every file.
       - name: Install Claude Code
-        if: runner.os != 'Windows'
-        run: |
-          curl -fsSL https://claude.ai/install.sh | bash
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Install Claude Code (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          irm https://claude.ai/install.ps1 | iex
-          "$env:USERPROFILE\.local\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+        run: npm install -g @anthropic-ai/claude-code@latest
 
       - run: claude --version
 

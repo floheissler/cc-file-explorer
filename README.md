@@ -353,9 +353,11 @@ as every mod does. It only reads:
   unchanged and never holds one.
 
 It makes no network requests, never calls a model, and writes no files of its
-own. The one program it starts is `git`, read-only (`status`, `ls-files`,
-`rev-parse`), with optional locks off so it never gets in the way of your own
-commits. Between sessions it keeps two things in the store Claude Code keeps
+own: nothing it reads leaves your machine. It reads no credentials and no
+environment variables. The one program it starts is `git`, read-only
+(`status`, `ls-files`, `rev-parse`), in the project's own folder, to draw the
+status markers and list the files the filter searches, with optional locks
+off so it never gets in the way of your own commits. Between sessions it keeps two things in the store Claude Code keeps
 for each plugin: whether its one-time fullscreen tip was shown, and for the
 50 projects you changed most recently, the open folders and the previewed
 file, as paths relative to each project, with the preview's pin and Markdown

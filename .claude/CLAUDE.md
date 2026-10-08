@@ -8,10 +8,12 @@ entry with `"source": "./"`). README.md has the user-facing behavior.
 ## Layout
 
 - `.claude-plugin/plugin.json`: the manifest. `types` names the state contract.
-  `displayName`, `supportUrl` and `icon` (`assets/icon.svg`) are for
+  `displayName`, `supportUrl` and `icon` (the SVG in assets) are for
   Anthropic's directory listing; `supportUrl`, `icon` and the directory's
   other listing fields go here only, as `marketplace.json` entries don't
-  take them.
+  take them. Name a bundled image only in Markdown image syntax, as the
+  README shows the demo, never in backticks or a code block: the directory
+  holds a version for review that does.
 - `.claude/CLAUDE.md`: this file. It lives under `.claude/` because a
   `CLAUDE.md` at the plugin root fails `claude plugin validate --strict`.
 - `.claude-plugin/marketplace.json`: makes the repo installable with
@@ -63,9 +65,12 @@ entry with `"source": "./"`). README.md has the user-facing behavior.
   and `git.test.ts` the markers with git stubbed too. An unstubbed `process.run` rejects, as git missing does: the
   other suites draw no git markers. A stub answers by `argv[1]`
   (`ls-files`, `rev-parse`, `status`), as both features run git.
-- `docs/demo.gif`: the README's demo, 1920 px wide and under 1 MB. Every
-  install copies the whole repository, this file included, so keep a new
+- `docs/`: the README's demo GIF, 1920 px wide and under 1 MB. Every
+  install copies the whole repository, the GIF included, so keep a new
   recording as small (half a 4K capture, one shared 256-color palette).
+- `.github/workflows/ci.yml` sits in the plugin folder too, and Anthropic's
+  directory scans it: install Claude Code there with npm, never a download
+  piped into a shell.
 - `ROADMAP.md` (gitignored, local): the working plan toward a publishable
   release, a checklist with context for each item. Start there when asked to
   work on the next item.
