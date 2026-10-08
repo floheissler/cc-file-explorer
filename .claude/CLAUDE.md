@@ -16,6 +16,7 @@ entry with `"source": "./"`). README.md has the user-facing behavior.
 - `hooks/host.ts`: the `Host` record the rest of the code takes instead of `$`.
 - `hooks/listing.ts`: reads folders and files through `Host` (`$.fs`).
   Everything but `.git` is listed, git-ignored entries included.
+- `hooks/paths.ts`: the one place that turns tree keys into native paths.
 - `hooks/tree.ts`, `levels.ts`, `layout.ts`, `preview.ts`, `text.ts`,
   `paths.ts`, `focus.ts`: pure logic. `levels.ts` holds the `e`/`c`/digit
   steps; `focus.ts` reads the focus order off a drawn tree and keeps the ring
@@ -54,6 +55,19 @@ the module otherwise:
 - Every drawn region is exactly as tall as `layout.ts` says, so the drawing fits
   the body: Up/Down then walk the controls, and the `ui.scroll` hook moves the
   tree's and the preview's own windows under a fixed header.
+- Two kinds of path. A *key* names a tree entry: root-relative,
+  `/`-separated, spelled as `$.fs.list` names the entry, never case- or
+  Unicode-folded; open folders, the previewed file and `row:<key>` use keys.
+  A *native* path is what `$.fs` takes. Only `paths.ts` converts
+  (`nativePathOf`, `rootLabelOf`): a root's style (`win32` for `C:\` or
+  `\\…`, else `posix`) is read off its spelling, since the engine has no
+  platform call, and a drive root or `/` keeps its separator.
+- The test host makes every `$.fs` path absolute by its own platform's rules,
+  so `tests/roots.test.ts` tries Windows-spelled roots only on a Windows host
+  and returns early elsewhere; `tests/paths.test.ts` covers them anywhere.
+- Hook matchers name tools this build has; a tool only another platform's
+  build has (PowerShell, on Windows) is matched by a pattern (`/^PowerShell$/`),
+  which still reads as a literal.
 - Untrusted text (file names, file contents, error messages) goes through
   `sanitize` before it is drawn or measured. It takes one line: C0 controls
   become Control Pictures (tab `␉`, line feed `␊`), so expand tabs first.

@@ -1,6 +1,6 @@
 import type { Host } from './host'
 import Limits from './limits'
-import { absolutePath, depthOf, joinPath } from './paths'
+import { depthOf, joinPath, nativePathOf } from './paths'
 import { isKnownBinary, noticeOf, previewOf, type Preview } from './preview'
 import { formatBytes, messageOf } from './text'
 import { compareEntries, type DirListing, type Entry } from './tree'
@@ -45,7 +45,7 @@ export async function readDir(
   dir: string,
 ): Promise<DirListing> {
   try {
-    const found = await host.list(absolutePath(listing.root, dir))
+    const found = await host.list(nativePathOf(listing.root, dir))
 
     const entries: Entry[] = found
       .filter(entry => entry.name !== GIT_DIR_NAME)
@@ -152,7 +152,7 @@ export async function readPreview(
   root: string,
   path: string,
 ): Promise<Preview> {
-  const absolute = absolutePath(root, path)
+  const absolute = nativePathOf(root, path)
 
   try {
     const stat = await host.stat(absolute)

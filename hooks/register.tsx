@@ -8,7 +8,7 @@ import Limits from './limits'
 import { collapseOneLevel, expandOneLevel, expandToDepth } from './levels'
 import { openListing, readDirs, readPreview, readTree, type Listing } from './listing'
 import { COMMAND_DESCRIPTION, PANE_TITLE, ROW_KEY_PREFIX } from './names'
-import { baseName } from './paths'
+import { rootLabelOf } from './paths'
 import { maxPreviewTop, type Preview } from './preview'
 import { messageOf } from './text'
 import {
@@ -512,7 +512,7 @@ export const register: Register = on => {
       actionsOf(host),
       Math.max(12, e.props.bodyColumns - Limits.RIGHT_PAD_COLUMNS),
       {
-        rootName: current === null ? 'Explorer' : baseName(current.root),
+        rootName: current === null ? 'Explorer' : rootLabelOf(current.root),
         rows,
         window,
         layout,
@@ -616,10 +616,14 @@ export const register: Register = on => {
 
   /**
    * After a tool call that can change files, an open pane re-reads what it
-   * shows once Claude pauses. The hook only watches: a failure in it lets
-   * the call's own result through.
+   * shows once Claude pauses: an edit, or a shell command (Bash, or
+   * PowerShell on native Windows). The hook only watches: a failure in it
+   * lets the call's own result through.
+   *
+   * PowerShell is matched by pattern: only Windows builds have the tool, so
+   * the tool names other builds type the matcher with leave it out.
    */
-  on('tool.call', { tool: ['Write', 'Edit', 'NotebookEdit', 'Bash'] }, async ($, e, next) => {
+  on('tool.call', { tool: ['Write', 'Edit', 'NotebookEdit', 'Bash', /^PowerShell$/] }, async ($, e, next) => {
     const result = await next(e)
 
     if (listing !== null) {

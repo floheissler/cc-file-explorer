@@ -94,6 +94,23 @@ controls and other unsafe characters as `�`, and long runs of combining marks
 are cut. A file cannot send escape sequences to your terminal or reorder a
 name.
 
+## Platforms
+
+| Platform | Status |
+| --- | --- |
+| Linux, WSL2 | Tested with Claude Code 2.1.294 |
+| Windows | Not tested yet. Drive roots (`C:\`), shares (`\\server\share`) and WSL's share (`\\wsl.localhost\…`) are covered by tests; a smoke test on native Windows is pending |
+| macOS | Not tested. Paths are POSIX, as on Linux, and composed and decomposed accents in names both draw |
+
+Known limits:
+
+- A network share lists only when Claude Code started on that host, and
+  `\\?\` paths are refused; both are the engine's rules for `$.fs`.
+- Symbolic links show as plain rows: a linked folder does not open and a
+  linked file does not preview. Windows junctions are expected to behave the
+  same.
+- Windows cannot read names that end in a dot or a space.
+
 ## How it works
 
 `hooks/register.tsx` is the hooks module; the rest of `hooks/` is its parts.
@@ -105,7 +122,7 @@ name.
 | `ui.render` of the `Pane` | Draws the header, the tree's window and, set off by a blank row and a rule with the file's name, the preview's window, each exactly as tall as its region; reads what the drawing needs but lacks |
 | `ui.scroll` of the pane | Moves the tree's or the preview's own window by the region under the pointer, as far as the wheel's rows say; the engine's window over the pane stays still |
 | `ui.focus` in the pane | Keeps the focused row and its neighbors in view, so the arrows always have a drawn row to move to, and lands the focus where that row is drawn after the window moves; keeps the focus off the hidden digit keys |
-| `tool.call` of `Write`, `Edit`, `NotebookEdit`, `Bash` | After the call, re-reads an open pane's tree and preview once Claude pauses |
+| `tool.call` of `Write`, `Edit`, `NotebookEdit`, `Bash`, `PowerShell` | After the call, re-reads an open pane's tree and preview once Claude pauses |
 | `classic.SessionStart` after `/clear`, `/resume`, `/branch` | Forgets what was read, as the session state resets |
 
 It calls `$.session.root`, `$.fs.list`, `$.fs.stat`, `$.fs.read`,

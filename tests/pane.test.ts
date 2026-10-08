@@ -1,6 +1,7 @@
 import type { FsEntry, On, RenderNode } from 'claude-code'
-import { expect, test, type Engine } from 'claude-code/testing'
+import { expect, mock, test, type Engine } from 'claude-code/testing'
 
+import Limits from '../hooks/limits'
 import { cellWidth } from '../hooks/text'
 
 const ROOT = '/work'
@@ -375,3 +376,41 @@ test('rows of wide names fill the row exactly, in cells', async ($, on) => {
     await ui.unmount()
   }
 })
+
+// PowerShell is Claude Code's shell on native Windows; the hook matches it by
+// pattern, since only Windows builds list the tool
+for (const tool of ['Bash', 'PowerShell'] as const) {
+  test(`after a ${tool} command, an open pane re-reads its tree`, async ($, on) => {
+    const clock = mock.clock(on)
+    const folders: Record<string, FsEntry[]> = { [ROOT]: [entry('a.txt', 'file', 2)] }
+    let isOpen = false
+
+    on('session.root', () => ({ value: ROOT }))
+    on('ui.panes', () => ({
+      value: isOpen
+        ? [{ id: 'file-explorer', title: 'Explorer', isShown: true, isFocused: true, isPlaced: true, plugin: 'file-explorer' }]
+        : [],
+    }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('fs.list', ($, e) => ({ value: folders[e.path] ?? [] }))
+    on('fs.stat', () => ({ value: { kind: 'file', size: 2, mtimeMs: 0, isLink: false } }))
+    on('fs.read', () => ({ value: 'hi' }))
+    on('tool.call', () => ({ result: 'ran' }))
+
+    await openTree($)
+    isOpen = true
+
+    const ui = await $.ui.mount(paneOf(30))
+    expect(await ui.find({ key: 'row:b.txt' })).toBeUndefined()
+
+    // The command writes a file; the pane re-reads once Claude pauses
+    folders[ROOT] = [entry('a.txt', 'file', 2), entry('b.txt', 'file', 2)]
+    await $.tool.call({ tool, command: 'echo hi > b.txt' } as never)
+    await clock.advance(Limits.REFRESH_DEBOUNCE_MS)
+
+    await ui.redraw()
+    expect(await ui.find({ key: 'row:b.txt' })).toBeDefined()
+
+    await ui.unmount()
+  })
+}

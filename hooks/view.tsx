@@ -6,7 +6,7 @@ import type { ElementTable, RenderElement } from 'claude-code'
 import type { MarkdownMode } from '../types'
 import type { PaneLayout } from './layout'
 import { depthKeyOf, KEYS, ROW_KEY_PREFIX } from './names'
-import { baseName } from './paths'
+import { nameOf } from './paths'
 import {
   codeWindowOf,
   lengthOf,
@@ -362,7 +362,7 @@ function treeRow(kit: Kit, row: TreeRow, selected: string | null): RenderElement
  */
 function previewTitleRow(kit: Kit, selected: string): RenderElement {
   const { Box, Text } = kit.ui
-  const name = truncateMiddle(sanitize(baseName(selected)), Math.max(4, kit.columns - 8))
+  const name = truncateMiddle(sanitize(nameOf(selected)), Math.max(4, kit.columns - 8))
 
   return (
     <Box flexDirection="row" height={1}>
