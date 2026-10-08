@@ -39,6 +39,7 @@ export const KEYS = {
   collapseLevel: 'collapse-level',
   filter: 'filter',
   help: 'help',
+  mention: 'mention',
   previewUp: 'preview-up',
   previewDown: 'preview-down',
   previewMode: 'preview-mode',

@@ -72,12 +72,14 @@ The first time `/tree` opens under the classic renderer, it leaves a one-line
 tip about `/tui fullscreen`, and never again. On a fullscreen terminal too
 narrow to dock the pane, it says once a session how wide the terminal must be.
 
-The header shows the tree's keys, `e: expand  c: collapse  r: refresh  f: filter  h: help`,
-and a previewed file's row its own, `k: ↑  j: ↓  m: source  x: close` (`x: back`
-above the prompt); `h` opens a help view with all of them.
+The header shows the tree's keys,
+`e: expand  c: collapse  r: refresh  f: filter  a: mention  h: help`, and a
+previewed file's row its own, `k: ↑  j: ↓  m: source  x: close`
+(`a: mention  x: back` above the prompt); `h` opens a help view with all of
+them.
 
 In a narrow pane (the dock opens 40 columns wide on a 110-column terminal)
-the rows shorten to fit. The header's keys become `e c r f  h: help`, then
+the rows shorten to fit. The header's keys become `e c r f a  h: help`, then
 `h: help` alone; the project's name keeps at least 8 columns. A previewed
 file's facts shorten from size, lines and mode to its size, and its keys step
 down the same way. Every key keeps working, and the help view's
@@ -93,6 +95,7 @@ descriptions wrap to the width.
 | `0` | Close every folder |
 | `r` | Re-read the tree, the previewed file and git's status at once |
 | `f` | Filter the tree by name: shows the filter's field over the tree, the keyboard in it; again to close the filter |
+| `a` | Mention the focused row to Claude at the prompt's cursor (`@src/`, `@README.md`), or the previewed file when no row has the focus |
 | `h` | Show or hide the help view |
 | Click the previewed file again (docked), or press `x` | Close the preview |
 | `m` | Switch a Markdown preview between rendered and source |
@@ -106,6 +109,26 @@ descriptions wrap to the width.
 stop early; press again to go further.
 
 Keys work while the pane has the keyboard: click it, or press Ctrl+X then Tab.
+
+### Mention a file to Claude
+
+`a` puts an `@` mention of the focused row at the prompt's cursor, as typing
+`@` and picking the file would: Claude Code reads the file, or lists the
+folder, when you send the prompt. With no row focused it mentions the
+previewed file, and above the prompt the file in view.
+
+- The mention is set off by a space from the words around it. A folder ends
+  in `/`, and a path with a space (or one a bare mention would cut short,
+  such as `notes.txt~`) is quoted: `@"My Notes/plan.md"`.
+- The path is spelled from the session's working folder, as Claude Code
+  resolves it: `@../README.md` after a shell `cd src`, and absolute once the
+  session has left the project.
+- The prompt takes the keyboard with the text, so you can type on. Ctrl+X
+  then Tab returns to the pane with the focus on the row you mentioned, to
+  walk on to the next.
+- A name with a `#` cannot be mentioned (Claude Code reads what follows it
+  as a line range), and a toast says so, as it does when the prompt is
+  behind a dialog.
 
 ### What the tree shows
 
@@ -238,24 +261,26 @@ Known limits:
 | `command.run` of `tree` | Opens the pane on its tree, focused (above the prompt: up to 40 rows, closed by Esc under the classic renderer), reads git's status beside it, and starts its checks for outside changes, or closes it when it is shown; leaves the one-time tip. With a path, closes a filter first, places the path under the root (an absolute one spelled through a link by where it lands), finds it folder by folder, each folder read afresh, opens its folders, picks a file, and moves the whole tree's window to its row, never closing the pane |
 | `ui.render` of the `Pane` | Draws for where the pane sits. Docked: the header, the filter's row while it is shown, the tree's window (filtered while the filter holds a query) and, set off by a blank row and a rule with the file's name, the preview's window, each exactly as tall as its region. Above the prompt: one view, the tree or the file or the help, as tall as its content. Rows carry their markers. Reads what the drawing needs but lacks |
 | `ui.scroll` of the pane | Moves the tree's or the preview's own window by the region under the pointer, as far as the wheel's rows say; the engine's window over the pane stays still |
-| `ui.focus` in the pane | Keeps the focused row and its neighbors in view, so the arrows always have a drawn row to move to, and lands the focus where that row is drawn after the window moves; keeps the focus off the hidden digit keys. The row `/tree <path>` revealed keeps the focus's start until you move it |
+| `ui.focus` in the pane | Keeps the focused row and its neighbors in view, so the arrows always have a drawn row to move to, and lands the focus where that row is drawn after the window moves; keeps the focus off the hidden digit keys; records where the focus rests, for `a` to mention the row it marks. The row `/tree <path>` revealed keeps the focus's start until you move it, and the row `a` mentioned until the focus lands anywhere |
 | `ui.close` of the pane | Above the prompt, a person's close steps back first: from the file or the help to the tree, from a filtered tree to the whole tree; a close that goes through stops the checks for outside changes |
 | `tool.call` of `Write`, `Edit`, `NotebookEdit`, `Bash`, `PowerShell` | After a call that may have written (not held read-only, not denied), re-reads an open pane's tree, preview, git status and, while filtering, file list once Claude pauses; after an edit that went through, marks its file as written this session |
 | `classic.SessionStart` after `/clear`, `/resume`, `/branch` | Forgets what was read, as the session state resets |
 
-It calls `$.session.root`, `$.fs.list`, `$.fs.stat`, `$.fs.read`,
-`$.process.run`, `$.clock.after`, `$.command.register`, `$.ui.open`,
-`$.ui.close`, `$.ui.panes`, `$.ui.resolve`, `$.ui.invalidate`, `$.ui.focus`,
-`$.ui.log`, `$.ui.toast`, `$.store.get`, `$.store.set` and its own
-`$.state`. It makes no network calls and writes no files of its own. The
-one process it starts is `git`, read-only, in the project: `git ls-files`
-for the filter's file list, and for the markers `git rev-parse
+It calls `$.session.root`, `$.session.cwd`, `$.fs.list`, `$.fs.stat`,
+`$.fs.read`, `$.process.run`, `$.clock.after`, `$.command.register`,
+`$.prompt.read`, `$.prompt.fill`, `$.ui.open`, `$.ui.close`, `$.ui.panes`,
+`$.ui.resolve`, `$.ui.invalidate`, `$.ui.focus`, `$.ui.log`, `$.ui.toast`,
+`$.store.get`, `$.store.set` and its own `$.state`. It makes no network
+calls and writes no files of its own. The one process it starts is `git`,
+read-only, in the project: `git ls-files` for the filter's file list, and
+for the markers `git rev-parse
 --show-prefix --absolute-git-dir`, then `git status --porcelain=v1 -z
 --untracked-files=all --ignored=matching -- .`. Every run has
 `GIT_OPTIONAL_LOCKS=0`, so it never takes a lock a commit beside it needs
-or writes the index, the C locale, and a timeout. Its one stored value,
-whether the fullscreen tip was shown, lives in the store Claude Code keeps
-for each plugin.
+or writes the index, the C locale, and a timeout. It reads the prompt's
+draft only when you press `a`, to set the mention off from the words
+around the cursor. Its one stored value, whether the fullscreen tip was
+shown, lives in the store Claude Code keeps for each plugin.
 `claude plugin validate .` prints the same list from the source.
 
 The person's view (open folders, the previewed file, where each window

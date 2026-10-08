@@ -3,6 +3,9 @@ import type {
   FsStat,
   ProcessRunInit,
   ProcessRunResult,
+  PromptBox,
+  PromptFillArgs,
+  PromptFilled,
   Timer,
   UiFocusResult,
   UiPane,
@@ -45,6 +48,11 @@ export type Host = {
    */
   readonly root: () => Promise<string>
   /**
+   * The session's working folder, absolute: where a shell `cd` took it, and
+   * what Claude Code resolves a mention's path against.
+   */
+  readonly cwd: () => Promise<string>
+  /**
    * Runs a program by its argument vector, no shell, and resolves once it
    * exits, any exit code. The mod runs `git` alone, through `git.ts`: the
    * filter's file list and the markers' status.
@@ -76,6 +84,14 @@ export type Host = {
    * Says something briefly without a turn: a level step that stopped early.
    */
   readonly toast: (text: string) => void
+  /**
+   * The person's prompt box: read as it stands, and written into, which
+   * hands it the keyboard.
+   */
+  readonly prompt: {
+    readonly read: () => Promise<PromptBox>
+    readonly fill: (args: PromptFillArgs) => Promise<PromptFilled>
+  }
   /**
    * This plugin's own store, kept between sessions: what the pane has told
    * the person once.

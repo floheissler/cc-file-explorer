@@ -15,7 +15,7 @@ import {
   type FilterIndex,
   type FilterView,
 } from './filter'
-import { focusOrderOf, focusStepOf, type FocusOrder } from './focus'
+import { focusOrderOf, focusStepOf, ringElementOf, ringPlaceOf, type FocusOrder } from './focus'
 import { hasStampMoved, isSameRead, readGitStatus, stampsOf, type GitRead } from './git'
 import type { Host } from './host'
 import {
@@ -39,6 +39,7 @@ import {
   stampDirs,
   type Listing,
 } from './listing'
+import { insertionOf, mentionOf, mentionPathOf, mentionTargetOf, mentionToastOf } from './mention'
 import {
   COMMAND_DESCRIPTION,
   filterKeyOf,
@@ -144,6 +145,7 @@ type ShownFolders = {
 function hostOf($: EngineInterface): Host {
   return {
     root: () => $.session.root(),
+    cwd: () => $.session.cwd(),
     run: (argv, init) => $.process.run(argv, init),
     list: path => $.fs.list(path),
     stat: path => $.fs.stat(path),
@@ -154,6 +156,10 @@ function hostOf($: EngineInterface): Host {
     focus: key => $.ui.focus({ requestId: PANE_ID, key }),
     after: (ms, fn) => $.clock.after(ms, fn),
     toast: text => $.ui.toast(text),
+    prompt: {
+      read: () => $.prompt.read(),
+      fill: args => $.prompt.fill(args),
+    },
     store: {
       get: key => $.store.get(key),
       set: (key, value) => $.store.set(key, value),
@@ -254,6 +260,45 @@ export const register: Register = on => {
    */
   let focusOrder: FocusOrder = { shown: [], hidden: new Set() }
   let lastFocused: string | undefined
+
+  /**
+   * Where the focus ring rests in the focus order. Claude Code keeps it at
+   * that place across a redraw, so `a` reads the row under it off the last
+   * drawing, not off `lastFocused`, which a redraw that adds rows above it
+   * leaves naming a row the ring has left.
+   */
+  let ringPlace: number | null = null
+
+  /**
+   * The row the ring was on when `a` handed the keyboard to the prompt: the
+   * ring starts there again as the pane takes the keyboard back, so the
+   * person walks on from it. Cleared once the ring lands anywhere.
+   */
+  let ringReturn: string | null = null
+
+  /**
+   * Forgets where the ring was: a pane without the keyboard shows none, and
+   * takes the keyboard back with the ring on nothing, or on its autofocused
+   * row.
+   */
+  const dropRing = () => {
+    ringPlace = null
+    lastFocused = undefined
+  }
+
+  /**
+   * Notes where the ring went: the element it landed on, and its place in
+   * the drawing it landed in. The row `a` left lets go of the ring then.
+   */
+  const noteRing = (host: Host, element: string | undefined, place: number | null) => {
+    lastFocused = element
+    ringPlace = place
+
+    if (ringReturn !== null) {
+      ringReturn = null
+      host.invalidate()
+    }
+  }
 
   /**
    * The previewed file's stamp when it was read, and whether `refresh` is
@@ -1079,8 +1124,10 @@ export const register: Register = on => {
   const focusOn = async (host: Host, key: string) => {
     const moved = await host.focus(key).catch(() => ({ deny: 'the pane could not take the focus' }))
 
+    // The ring landed once the element was drawn: its place is read off the
+    // drawing that holds it
     if (moved.deny === undefined) {
-      lastFocused = key
+      noteRing(host, key, ringPlaceOf(focusOrder, key))
     }
   }
 
@@ -1359,6 +1406,45 @@ export const register: Register = on => {
 
       await focusOn(host, `${ROW_KEY_PREFIX}${first}`)
     },
+
+    // The prompt box takes the keyboard as it takes the text, so the person
+    // types on at once; Ctrl+X Tab brings the ring back to the row
+    mention: async () => {
+      const focused = ringElementOf(focusOrder, ringPlace)
+      const target = mentionTargetOf(focused, drawn?.rows ?? null, await host.state.selected.get())
+
+      if (target === null) {
+        host.toast(mentionToastOf('none'))
+
+        return
+      }
+
+      try {
+        const opened = await ensureListing(host)
+        const mention = mentionOf(mentionPathOf(opened.root, await host.cwd(), target), target.isDir)
+
+        if ('problem' in mention) {
+          host.toast(mentionToastOf(mention.problem, target.key))
+
+          return
+        }
+
+        const box = await host.prompt.read()
+        const filled = await host.prompt.fill({ text: insertionOf(box, mention.text), mode: 'insert' })
+
+        if (!filled.isFilled) {
+          host.toast(mentionToastOf(filled.refusal ?? 'refused', target.key))
+
+          return
+        }
+
+        dropRing()
+        ringReturn = focused === `${ROW_KEY_PREFIX}${target.key}` ? target.key : null
+        host.invalidate()
+      } catch (error) {
+        host.toast(mentionToastOf('failed', target.key, messageOf(error)))
+      }
+    },
   })
 
   on('session.start', async ($, e, next) => {
@@ -1418,7 +1504,8 @@ export const register: Register = on => {
       await closeFilter(host)
     }
 
-    lastFocused = undefined
+    dropRing()
+    ringReturn = null
     isFileShown = false
     revealed = null
     await update($, HELP_SHOWN, () => false)
@@ -1520,6 +1607,12 @@ export const register: Register = on => {
     seat = { placement: e.props.placement, isClassic: e.viewport?.isFullscreen === false }
     room = e.props.scroll.bodyRows
 
+    // Without the keyboard the pane shows no ring, and it takes the keyboard
+    // back with the ring on nothing, or on the row drawn to take it
+    if (!e.props.isFocused) {
+      dropRing()
+    }
+
     // The cells across a row: the dock keeps a column clear at its edge
     const columns = Math.max(
       1,
@@ -1583,6 +1676,7 @@ export const register: Register = on => {
         markdownMode,
         helpShown,
         filter,
+        mentioned: ringReturn,
       },
     )
 
@@ -1639,18 +1733,23 @@ export const register: Register = on => {
       revealed = null
     }
 
-    const step = focusStepOf(e.element, lastFocused, focusOrder)
+    // The drawing the ring moves in: moving the window below redraws the
+    // pane before the ring lands
+    const order = focusOrder
+    const step = focusStepOf(e.element, lastFocused, order)
 
     if (step === 'stay') {
       return {}
     }
 
-    // Passes the move on, remembering the element the ring ends up on
+    // Passes the move on, remembering the element the ring ends up on, and
+    // its place: where `moved` lands it in this drawing, which is where
+    // `element` is drawn once the window moved
     const land = async (element: string | undefined, moved: typeof e) => {
       const result = await next(moved)
 
       if (result.deny === undefined) {
-        lastFocused = element
+        noteRing(hostOf($), element, ringPlaceOf(order, moved.element))
       }
 
       return result
