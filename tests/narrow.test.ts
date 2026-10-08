@@ -166,8 +166,8 @@ const VIEWS: readonly {
     shows: 'search-next',
   },
   {
-    name: 'searched Markdown source',
-    presses: ['row:README.md', 'preview-mode', 'search'],
+    name: 'searched Markdown',
+    presses: ['row:README.md', 'search'],
     search: 'words',
     shows: 'search-next',
   },

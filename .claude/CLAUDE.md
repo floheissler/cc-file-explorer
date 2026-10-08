@@ -134,8 +134,11 @@ the module otherwise:
   character, mid-word (checked live on 2.1.294); `windowMarksOf` takes the
   cells from `sourceColumnsOf` of that line. A table bolds the current row's
   matching cells in the Markdown the mod writes (`TableMark`), and places a
-  match by the table's rows (`tableRowsIn`, see the CSV bullet); rendered
-  Markdown has no row a line maps to, so it scrolls to the match unmarked.
+  match by the table's rows (`tableRowsIn`, see the CSV bullet). Rendered
+  Markdown has no row a line maps to, so while the search shows, a
+  Markdown file draws as its source (`shownMarkdownMode`, the fit's
+  `isSource` by `Drawn.hasSearch`) and `m` is not drawn; the project's
+  `markdownMode` stays as it is, and shows again once the search closes.
   Its field is re-keyed per Enter as the filter's is (`searchKeyOf`). Enter
   keeps the match and moves the ring onto `search-next`, so Enter steps on;
   `n`/`b` are drawn only while there are matches. The arrows cannot step: a

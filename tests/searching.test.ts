@@ -269,23 +269,33 @@ test('a table bolds the matching cells of the match’s row', async ($, on) => {
   await ui.unmount()
 })
 
-test('rendered Markdown tops its window with the match’s line', async ($, on) => {
+test('a Markdown file shows its source while the search is open, where the bars mark it', async ($, on) => {
   stubProject(on)
   await openTree($)
 
   const ui = await $.ui.mount(paneOn('terminal'))
 
   await ui.press({ key: 'row:README.md' })
+  expect(await ui.find({ type: 'Markdown' })).toBeDefined()
+  expect(await ui.find({ key: 'preview-mode' })).toMatchObject({ props: { label: 'source' } })
+
+  // The search shows the source, and m, which would change nothing drawn,
+  // is not drawn meanwhile
   await ui.press({ key: 'search' })
+  expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
+  expect(await ui.find({ key: 'preview-mode' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /· source$/ })).toBeDefined()
+
+  // The match lands two lines below the top, its bar beside it
   await ui.input({ key: searchKeyOf(0), text: 'needle' })
-
   expect(await statusOf(ui, '1/1')).toBeDefined()
-  expect(String((await ui.find({ type: 'Markdown' }))?.props.text)).toMatch(/^the needle line/)
+  expect(await startLineOf(ui)).toBe(49)
+  expect(await marksOf(ui)).toEqual(['-', '-', 'current', ...Array(12).fill('-')])
 
-  // Its source draws the marks
-  await ui.press({ key: 'preview-mode' })
-  await ui.press({ key: 'search-next' })
-  expect(await marksOf(ui)).toContain('current')
+  // Closed, the rendered form shows again, from the same line
+  await ui.press({ key: 'search' })
+  expect(String((await ui.find({ type: 'Markdown' }))?.props.text)).toMatch(/^line 24/)
+  expect(await ui.find({ key: 'preview-mode' })).toMatchObject({ props: { label: 'source' } })
 
   await ui.unmount()
 })
