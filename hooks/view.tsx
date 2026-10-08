@@ -4,7 +4,7 @@
 import type { ElementTable, RenderElement } from 'claude-code'
 
 import type { MarkdownMode } from '../types'
-import type { PaneLayout } from './layout'
+import type { InlineView, PaneLayout } from './layout'
 import { depthKeyOf, KEYS, ROW_KEY_PREFIX } from './names'
 import { nameOf } from './paths'
 import {
@@ -52,9 +52,26 @@ export type PaneActions = {
 }
 
 /**
+ * Where the pane sits, as each drawing says: docked beside the transcript,
+ * or inline above the prompt; and whether the session draws with Claude
+ * Code's classic renderer, which has no mouse and closes an inline pane on
+ * Esc (fullscreen below 110 columns seats a pane inline too).
+ */
+export type Seat = {
+  readonly placement: 'dock' | 'inline'
+  readonly isClassic: boolean
+}
+
+/**
  * Everything one drawing of the pane draws from.
  */
 export type PaneModel = {
+  readonly seat: Seat
+  /**
+   * The one view an inline pane shows; null in the dock, which shows the
+   * tree and the preview together.
+   */
+  readonly inlineView: InlineView | null
   readonly rootName: string
   readonly rows: readonly TreeRow[]
   readonly window: TreeWindow
@@ -106,11 +123,31 @@ export function paneView(
   const { Box } = ui
   const kit: Kit = { ui, actions, columns }
 
+  if (model.inlineView === 'file' && model.selected !== null) {
+    return (
+      <Box flexDirection="column" width={columns}>
+        {inlineFileHeadRow(kit, model, model.selected)}
+        {previewRegion(kit, model)}
+        {hiddenKeys(kit)}
+      </Box>
+    )
+  }
+
   if (model.helpShown) {
     return (
       <Box flexDirection="column" width={columns}>
         {headerRow(kit, model)}
-        {helpRegion(kit, model.layout.bodyRows - 1)}
+        {helpRegion(kit, model.layout.bodyRows - 1, model.seat)}
+        {hiddenKeys(kit)}
+      </Box>
+    )
+  }
+
+  if (model.inlineView === 'tree') {
+    return (
+      <Box flexDirection="column" width={columns}>
+        {headerRow(kit, model)}
+        {treeRegion(kit, model)}
         {hiddenKeys(kit)}
       </Box>
     )
@@ -155,10 +192,27 @@ function hiddenKeys(kit: Kit): RenderElement {
 const DIGITS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as const
 
 /**
- * Every key and pointer action, grouped, as the help view lists them.
+ * One group of the help view: its keys and what each does, and lines of
+ * its own under them.
  */
-const HELP: readonly { readonly title: string; readonly rows: readonly (readonly [string, string])[] }[] = [
-  {
+type HelpSection = {
+  readonly title: string
+  readonly rows: readonly (readonly [string, string])[]
+  readonly notes?: readonly string[]
+}
+
+/**
+ * Every key and pointer action, grouped, as the help view lists them where
+ * the pane sits: inline, a file replaces the tree and Esc steps back, and
+ * the classic renderer has no mouse.
+ *
+ * @param seat where the pane sits
+ * @returns the sections
+ */
+function helpSectionsOf(seat: Seat): readonly HelpSection[] {
+  const isInline = seat.placement === 'inline'
+
+  const keys: HelpSection = {
     title: 'Keys, while the pane has the keyboard (click it, or Ctrl+X then Tab)',
     rows: [
       ['e', 'open every folder in view one level deeper'],
@@ -168,31 +222,71 @@ const HELP: readonly { readonly title: string; readonly rows: readonly (readonly
       ['r', 're-read the tree and the preview'],
       ['j  k', 'scroll the preview down, up'],
       ['m', 'Markdown preview: rendered or source'],
-      ['x', 'close the preview'],
+      ['x', isInline ? 'close the file, back to the tree' : 'close the preview'],
       ['h', 'show or hide this help'],
-      ['Tab ↑ ↓', 'move between rows; Enter opens'],
+      ['Tab ↑ ↓', isInline ? 'move between rows; Enter shows a file' : 'move between rows; Enter opens'],
     ],
-  },
-  {
+  }
+
+  const mouse: HelpSection = {
     title: 'Mouse',
     rows: [
       ['click', 'open a folder, preview a file; again to close it'],
       ['wheel', 'scroll the tree or the preview under the pointer'],
     ],
-  },
-  {
+  }
+
+  if (!isInline) {
+    return [
+      keys,
+      mouse,
+      {
+        title: 'Pane',
+        rows: [
+          ['Ctrl+X ← →', 'resize'],
+          ['Ctrl+X X', 'close'],
+          ['Esc', 'give the keyboard back to the prompt'],
+        ],
+      },
+    ]
+  }
+
+  const pane: HelpSection = {
     title: 'Pane',
     rows: [
-      ['Ctrl+X ← →', 'resize'],
-      ['Ctrl+X X', 'close'],
-      ['Esc', 'give the keyboard back to the prompt'],
+      ['Ctrl+X ↑ ↓', 'resize; kept for every pane above the prompt'],
+      ['Ctrl+X X', 'back to the tree, then close'],
+      ['Esc', seat.isClassic ? 'back to the tree, then close' : 'give the keyboard back to the prompt'],
     ],
-  },
-]
+    notes: [
+      seat.isClassic
+        ? 'Tip: /tui fullscreen docks the tree beside the conversation and adds the mouse.'
+        : 'Tip: a terminal 110 columns wide docks the tree beside the conversation.',
+    ],
+  }
+
+  return seat.isClassic ? [keys, pane] : [keys, mouse, pane]
+}
+
+/**
+ * The rows the help view takes drawn whole: each section's title, rows and
+ * notes, and a blank row between sections.
+ *
+ * @param seat where the pane sits
+ * @returns the rows
+ */
+export function helpHeightOf(seat: Seat): number {
+  const sections = helpSectionsOf(seat)
+
+  return sections.reduce(
+    (rows, section, at) => rows + (at > 0 ? 1 : 0) + 1 + section.rows.length + (section.notes?.length ?? 0),
+    0,
+  )
+}
 
 const HELP_KEY_COLUMNS = 12
 
-function helpRegion(kit: Kit, rows: number): RenderElement {
+function helpRegion(kit: Kit, rows: number, seat: Seat): RenderElement {
   const { Box, Text } = kit.ui
   const room = Math.max(1, kit.columns - HELP_KEY_COLUMNS)
 
@@ -201,7 +295,7 @@ function helpRegion(kit: Kit, rows: number): RenderElement {
   return (
     <Box flexDirection="column" height={Math.max(1, rows)} overflow="hidden">
       <Box flexDirection="column" flexShrink={0}>
-        {HELP.flatMap((section, at) => [
+        {helpSectionsOf(seat).flatMap((section, at) => [
           ...(at > 0 ? [<Box height={1} />] : []),
           <Text bold wrap="truncate-end">
             {section.title}
@@ -213,6 +307,11 @@ function helpRegion(kit: Kit, rows: number): RenderElement {
                 {truncateEnd(does, room)}
               </Text>
             </Box>
+          )),
+          ...(section.notes ?? []).map(note => (
+            <Text dimColor italic wrap="truncate-end">
+              {truncateEnd(note, kit.columns)}
+            </Text>
           )),
         ])}
       </Box>
@@ -277,7 +376,9 @@ function treeRegion(kit: Kit, model: PaneModel): RenderElement {
       {window.above > 0 && (
         <Text dimColor wrap="truncate-end">{`↑ ${window.above} more`}</Text>
       )}
-      {rows.slice(window.start, window.end).map(row => treeRow(kit, row, model.selected))}
+      {rows
+        .slice(window.start, window.end)
+        .map(row => treeRow(kit, row, model.selected, model.inlineView === 'tree'))}
       {window.below > 0 && (
         <Text dimColor wrap="truncate-end">{`↓ ${window.below} more`}</Text>
       )}
@@ -301,9 +402,16 @@ function branchOf(row: TreeRow, columns: number): string {
 /**
  * One row of the tree: its branch lines, dim, then the row itself. An entry
  * is a Button padded to the row's end, so the name and the rest of the row
- * press it; the branch lines are drawing only.
+ * press it; the branch lines are drawing only. In an inline pane's tree the
+ * picked file's row takes the focus ring as the pane takes the keyboard, so
+ * stepping back from the file lands on it.
  */
-function treeRow(kit: Kit, row: TreeRow, selected: string | null): RenderElement {
+function treeRow(
+  kit: Kit,
+  row: TreeRow,
+  selected: string | null,
+  isInlineTree: boolean,
+): RenderElement {
   const { Box, Text, Button } = kit.ui
   const branch = branchOf(row, kit.columns)
   const room = Math.max(1, kit.columns - branch.length)
@@ -351,6 +459,7 @@ function treeRow(kit: Kit, row: TreeRow, selected: string | null): RenderElement
         plain
         dimColor={!isDir && !isSelected}
         onPress={onPress}
+        {...(isInlineTree && isSelected ? { autoFocus: true } : {})}
       />
     </Box>
   )
@@ -375,6 +484,28 @@ function previewTitleRow(kit: Kit, selected: string): RenderElement {
   )
 }
 
+/**
+ * An inline pane's file view starts with one row: the file's name set in a
+ * rule, then its controls; `x` steps back to the tree.
+ */
+function inlineFileHeadRow(kit: Kit, model: PaneModel, selected: string): RenderElement {
+  const { Box, Text } = kit.ui
+  const controls = previewControls(kit, model, 'back')
+  const name = truncateMiddle(sanitize(nameOf(selected)), Math.max(4, kit.columns - 40))
+
+  return (
+    <Box flexDirection="row" height={1} columnGap={1}>
+      <Text dimColor>{'──'}</Text>
+      <Text bold wrap="truncate-middle">
+        {name}
+      </Text>
+      <Text dimColor>{'──'}</Text>
+      <Box flexGrow={1} />
+      {controls}
+    </Box>
+  )
+}
+
 function metaTextOf(preview: Preview | null, markdownMode: MarkdownMode): string {
   if (preview === null) {
     return ''
@@ -394,56 +525,70 @@ function metaTextOf(preview: Preview | null, markdownMode: MarkdownMode): string
   }
 }
 
-function previewMetaRow(kit: Kit, model: PaneModel): RenderElement {
-  const { Box, Text, Button } = kit.ui
+/**
+ * The previewed file's controls: scroll it (when it has lines), switch a
+ * Markdown file's form, and close it, `x` labelled for where it leads.
+ */
+function previewControls(kit: Kit, model: PaneModel, closeLabel: string): RenderElement[] {
+  const { Button } = kit.ui
   const { preview, markdownMode } = model
   const isScrollable = preview !== null && lengthOf(preview) > 0
   const isMarkdown = preview?.kind === 'markdown'
 
+  return [
+    ...(isScrollable
+      ? [
+          <Button
+            key={KEYS.previewUp}
+            label="↑"
+            hotkey="k"
+            plain
+            dimColor
+            onPress={() => kit.actions.scrollPreview(-1)}
+          />,
+          <Button
+            key={KEYS.previewDown}
+            label="↓"
+            hotkey="j"
+            plain
+            dimColor
+            onPress={() => kit.actions.scrollPreview(1)}
+          />,
+        ]
+      : []),
+    ...(isMarkdown
+      ? [
+          <Button
+            key={KEYS.previewMode}
+            label={markdownMode === 'rendered' ? 'source' : 'rendered'}
+            hotkey="m"
+            plain
+            dimColor
+            onPress={kit.actions.toggleMarkdownMode}
+          />,
+        ]
+      : []),
+    <Button
+      key={KEYS.previewClose}
+      label={closeLabel}
+      hotkey="x"
+      plain
+      dimColor
+      onPress={kit.actions.closePreview}
+    />,
+  ]
+}
+
+function previewMetaRow(kit: Kit, model: PaneModel): RenderElement {
+  const { Box, Text } = kit.ui
+
   return (
     <Box flexDirection="row" height={1} columnGap={1}>
       <Text dimColor wrap="truncate-end">
-        {metaTextOf(preview, markdownMode)}
+        {metaTextOf(model.preview, model.markdownMode)}
       </Text>
       <Box flexGrow={1} />
-      {isScrollable && (
-        <Button
-          key={KEYS.previewUp}
-          label="↑"
-          hotkey="k"
-          plain
-          dimColor
-          onPress={() => kit.actions.scrollPreview(-1)}
-        />
-      )}
-      {isScrollable && (
-        <Button
-          key={KEYS.previewDown}
-          label="↓"
-          hotkey="j"
-          plain
-          dimColor
-          onPress={() => kit.actions.scrollPreview(1)}
-        />
-      )}
-      {isMarkdown && (
-        <Button
-          key={KEYS.previewMode}
-          label={markdownMode === 'rendered' ? 'source' : 'rendered'}
-          hotkey="m"
-          plain
-          dimColor
-          onPress={kit.actions.toggleMarkdownMode}
-        />
-      )}
-      <Button
-        key={KEYS.previewClose}
-        label="close"
-        hotkey="x"
-        plain
-        dimColor
-        onPress={kit.actions.closePreview}
-      />
+      {previewControls(kit, model, 'close')}
     </Box>
   )
 }

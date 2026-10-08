@@ -55,5 +55,13 @@ export type Host = {
    * Says something briefly without a turn: a level step that stopped early.
    */
   readonly toast: (text: string) => void
+  /**
+   * This plugin's own store, kept between sessions: what the pane has told
+   * the person once.
+   */
+  readonly store: {
+    readonly get: (key: string) => Promise<unknown>
+    readonly set: (key: string, value: unknown) => Promise<void>
+  }
   readonly state: PaneState
 }

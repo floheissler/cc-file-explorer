@@ -55,6 +55,25 @@ the module otherwise:
   built-in starts with `tr`), where `/explorer` ranked below `/export`. It must
   not start with `file-`: Claude Code 2.1.293's command menu draws any such
   name as a one-line `+ /name – description` row.
+- The layout follows each drawing's `e.props.placement`, never the open's:
+  the pane moves between the dock and inline as the terminal is resized.
+  Docked, the tree and the preview share the body (`paneLayoutOf`). Inline,
+  one view shows at a time (`inlineViewOf`: the help, the picked file while
+  `isFileShown`, else the tree), as tall as its content (`inlineLayoutOf`);
+  the help is drawn whole, for Claude Code's window over the pane to scroll.
+  `/tree` always opens on the tree. `e.viewport.isFullscreen === false` is
+  the classic renderer: no mouse, and Esc closes an inline pane.
+- Every open goes through `paneArgsOf` (focus, `rows`, `closeOnEscape` under
+  the classic renderer), as each `$.ui.open` sets them all anew.
+- Inline, a person's close (Esc, the close mark, Ctrl+X X) steps back first:
+  the `ui.close` hook answers `{ deny }`, shows the tree, and opens the pane
+  again; the picked file's row has `autoFocus`, so the ring lands on it.
+  The test kit cannot raise a person's close (`$.ui.close` is undefined
+  there), so `escapeStepOf` carries the decision and is tested pure.
+- The one-time fullscreen tip is a `$.store` flag (`fullscreenTipShown`),
+  which Claude Code keeps in `~/.claude/plugins/store/`. A live probe under
+  the classic renderer (`CLAUDE_CODE_NO_FLICKER=0 claude`) sets it: delete
+  the mod's store file afterwards.
 - Every drawn region is exactly as tall as `layout.ts` says, so the drawing fits
   the body: Up/Down then walk the controls, and the `ui.scroll` hook moves the
   tree's and the preview's own windows under a fixed header.

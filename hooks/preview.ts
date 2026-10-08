@@ -221,6 +221,37 @@ export function lengthOf(preview: Preview): number {
 }
 
 /**
+ * Rows a drawn table takes beyond its body rows: its borders, header and
+ * rule.
+ */
+const TABLE_FRAME_ROWS = 4
+
+/**
+ * The rows a preview takes drawn whole, as tall as an inline pane draws it:
+ * source a row a line, Markdown about one (it wraps and joins lines), a
+ * table its body and frame, a notice two for a wrapped line, and one while
+ * the file is read.
+ *
+ * @param preview the preview, or null while it is read
+ * @returns the rows
+ */
+export function previewHeightOf(preview: Preview | null): number {
+  if (preview === null) {
+    return 1
+  }
+
+  switch (preview.kind) {
+    case 'notice':
+      return 2
+    case 'table':
+      return lengthOf(preview) + TABLE_FRAME_ROWS
+    case 'markdown':
+    case 'code':
+      return Math.max(1, lengthOf(preview))
+  }
+}
+
+/**
  * The preview window's last top. Source fills its rows line for line; the
  * rendered forms draw a line or row taller or shorter than one, so they
  * scroll until their last line or row reaches the top.

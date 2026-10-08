@@ -1,9 +1,16 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, Timer, ToolCallResult } from 'claude-code'
+import type { CommandPresentation, EngineInterface, Register, Timer, ToolCallResult } from 'claude-code'
 
 import { focusOrderOf, focusStepOf, type FocusOrder } from './focus'
 import type { Host } from './host'
-import { paneLayoutOf, regionAt, type PaneLayout } from './layout'
+import {
+  escapeStepOf,
+  inlineLayoutOf,
+  inlineViewOf,
+  paneLayoutOf,
+  regionAt,
+  type PaneLayout,
+} from './layout'
 import Limits from './limits'
 import { collapseOneLevel, expandOneLevel, expandToDepth } from './levels'
 import {
@@ -15,10 +22,17 @@ import {
   stampDirs,
   type Listing,
 } from './listing'
-import { COMMAND_DESCRIPTION, PANE_TITLE, ROW_KEY_PREFIX } from './names'
+import {
+  COMMAND_DESCRIPTION,
+  FULLSCREEN_TIP_TEXT,
+  PANE_TITLE,
+  ROW_KEY_PREFIX,
+  TIP_SHOWN_KEY,
+  WIDEN_TIP_TEXT,
+} from './names'
 import { rootLabelOf } from './paths'
 import { changedDirsOf, mayHaveWritten, pollBatchOf, shownDirsOf } from './poll'
-import { maxPreviewTop, type Preview } from './preview'
+import { maxPreviewTop, previewHeightOf, type Preview } from './preview'
 import { messageOf } from './text'
 import {
   clamp,
@@ -29,7 +43,7 @@ import {
   treeWindowOf,
   type TreeRow,
 } from './tree'
-import { paneView, type PaneActions } from './view'
+import { helpHeightOf, paneView, type PaneActions, type Seat } from './view'
 
 /**
  * The pane's id and the command that toggles it. The hooks' matchers spell
@@ -80,6 +94,10 @@ function hostOf($: EngineInterface): Host {
     invalidate: () => $.ui.invalidate('ui.render'),
     after: (ms, fn) => $.clock.after(ms, fn),
     toast: text => $.ui.toast(text),
+    store: {
+      get: key => $.store.get(key),
+      set: (key, value) => $.store.set(key, value),
+    },
     state: {
       expanded: {
         get: () => read($, EXPANDED),
@@ -122,6 +140,21 @@ function hostOf($: EngineInterface): Host {
 }
 
 /**
+ * What `/tree` opens the pane with, and opens it again with: focused, as
+ * tall as its content inline up to `INLINE_ROWS` (the dock ignores `rows`),
+ * and under the classic renderer closed by Esc, as Claude Code's own dialogs
+ * are. One builder, as each open sets every one of these anew.
+ *
+ * @param isClassic whether the session draws with the classic renderer
+ * @returns the open's argument
+ */
+function paneArgsOf(isClassic: boolean) {
+  const base = { id: PANE_ID, title: PANE_TITLE, focus: true, rows: Limits.INLINE_ROWS } as const
+
+  return isClassic ? { ...base, closeOnEscape: true as const } : base
+}
+
+/**
  * Registers the explorer: `/tree` toggles a pane that lists the project
  * as a tree, folders opening in place, and previews the file picked under
  * it. The pane scrolls its tree and its preview itself, under a header that
@@ -156,6 +189,20 @@ export const register: Register = on => {
    */
   let previewStamp: { readonly path: string; readonly stamp: string | null } | null = null
   let isRefreshing = false
+
+  /**
+   * Where the last drawing sat, and whether an inline pane shows the picked
+   * file in place of the tree. `/tree` opens on the tree; picking a file
+   * shows it; `x`, Esc or the close mark step back.
+   */
+  let seat: Seat = { placement: 'dock', isClassic: false }
+  let isFileShown = false
+
+  /**
+   * Whether this session was told once to widen a fullscreen terminal too
+   * narrow to dock the pane.
+   */
+  let hasToldWiden = false
 
   /**
    * The polls for changes made outside Claude, while the pane is open: one
@@ -253,7 +300,7 @@ export const register: Register = on => {
    * layout the pane has with or without a preview.
    */
   const revealRow = async (host: Host, path: string, hasPreview: boolean) => {
-    if (drawn === null) {
+    if (drawn === null || seat.placement === 'inline') {
       return
     }
 
@@ -433,6 +480,37 @@ export const register: Register = on => {
     polling.timer = null
   }
 
+  /**
+   * The line `/tree` leaves as it opens a pane inline: under the classic
+   * renderer the fullscreen tip, once ever; on a fullscreen terminal too
+   * narrow to dock, the width it takes, once a session.
+   *
+   * @returns the line, or null
+   */
+  const tipOf = async (host: Host, presentation: CommandPresentation | undefined): Promise<string | null> => {
+    if (presentation === undefined) {
+      return null
+    }
+
+    if (!presentation.isFullscreen) {
+      if ((await host.store.get(TIP_SHOWN_KEY)) === true) {
+        return null
+      }
+
+      await host.store.set(TIP_SHOWN_KEY, true)
+
+      return FULLSCREEN_TIP_TEXT
+    }
+
+    if (presentation.columns < Limits.DOCK_MIN_COLUMNS && !hasToldWiden) {
+      hasToldWiden = true
+
+      return WIDEN_TIP_TEXT
+    }
+
+    return null
+  }
+
   const scheduleRefresh = (host: Host) => {
     refreshTimer?.cancel()
     refreshTimer = host.after(Limits.REFRESH_DEBOUNCE_MS, () => {
@@ -476,6 +554,20 @@ export const register: Register = on => {
     },
 
     selectFile: async path => {
+      // Inline, a file takes the tree's place; picked again, it shows again
+      if (seat.placement === 'inline') {
+        if ((await host.state.selected.get()) !== path) {
+          await loadPreview(host, path)
+          await host.state.previewTop.set(() => 0)
+          await host.state.selected.set(() => path)
+        }
+
+        isFileShown = true
+        host.invalidate()
+
+        return
+      }
+
       if ((await host.state.selected.get()) === path) {
         await host.state.selected.set(() => null)
 
@@ -545,6 +637,7 @@ export const register: Register = on => {
     },
 
     closePreview: async () => {
+      isFileShown = false
       await host.state.selected.set(() => null)
     },
 
@@ -590,17 +683,19 @@ export const register: Register = on => {
       return {}
     }
 
+    // A pane opens on the tree: a file shown inline, or the help, is left
     forget()
     lastFocused = undefined
+    isFileShown = false
+    await update($, HELP_SHOWN, () => false)
     await ensureListing(hostOf($)).catch(() => undefined)
 
-    const isInline = e.presentation?.isFullscreen === false
-    const base = { id: PANE_ID, title: PANE_TITLE, focus: true } as const
-
-    await $.ui.open(isInline ? { ...base, closeOnEscape: true } : base)
+    await $.ui.open(paneArgsOf(e.presentation?.isFullscreen === false))
     startPolling(hostOf($))
 
-    return {}
+    const tip = await tipOf(hostOf($), e.presentation).catch(() => null)
+
+    return tip === null ? {} : { text: tip }
   })
 
   on('ui.render', { component: 'Pane', requestId: 'file-explorer' }, async ($, e, next) => {
@@ -656,7 +751,27 @@ export const register: Register = on => {
         .catch(() => undefined)
     }
 
-    const layout = paneLayoutOf(e.props.scroll.bodyRows, selected !== null)
+    // The layout follows each drawing's seat: the pane moves between the dock
+    // and inline as the terminal is resized. Inline it shows one view, as
+    // tall as its content.
+    seat = { placement: e.props.placement, isClassic: e.viewport?.isFullscreen === false }
+
+    const shownPreview = isPreviewStale ? null : preview
+    const inlineView = seat.placement === 'inline' ? inlineViewOf({ helpShown, isFileShown, selected }) : null
+
+    const layout =
+      inlineView === null
+        ? paneLayoutOf(e.props.scroll.bodyRows, selected !== null)
+        : inlineLayoutOf(
+            e.props.scroll.bodyRows,
+            inlineView,
+            inlineView === 'tree'
+              ? rows.length
+              : inlineView === 'file'
+                ? previewHeightOf(shownPreview)
+                : helpHeightOf(seat),
+          )
+
     const window = treeWindowOf(rows.length, treeTop, layout.treeRows)
 
     // The help view stands in for the tree: the scroll and focus hooks then
@@ -668,12 +783,14 @@ export const register: Register = on => {
       actionsOf(host),
       Math.max(12, e.props.bodyColumns - Limits.RIGHT_PAD_COLUMNS),
       {
+        seat,
+        inlineView,
         rootName: current === null ? 'Explorer' : rootLabelOf(current.root),
         rows,
         window,
         layout,
         selected,
-        preview: isPreviewStale ? null : preview,
+        preview: shownPreview,
         previewTop,
         markdownMode,
         helpShown,
@@ -772,9 +889,29 @@ export const register: Register = on => {
 
   /**
    * The pane closing, by `/tree`, its close mark or a key: the polls stop.
-   * No `.catch`: a throw of `next` passes on as it came, never run twice.
+   * Inline, the person's close steps back from the file or the help to the
+   * tree first, as Claude Code's own dialogs do; the pane opens again with
+   * the keyboard, and the picked file's row takes the focus ring. No
+   * `.catch`: a throw of `next` passes on as it came, never run twice.
    */
   on('ui.close', { id: 'file-explorer' }, async ($, e, next) => {
+    if (e.origin.kind === 'person' && seat.placement === 'inline') {
+      const view = inlineViewOf({
+        helpShown: await read($, HELP_SHOWN),
+        isFileShown,
+        selected: await read($, SELECTED),
+      })
+
+      if (escapeStepOf(view) !== null) {
+        isFileShown = false
+        await update($, HELP_SHOWN, () => false)
+        hostOf($).invalidate()
+        void $.ui.open(paneArgsOf(seat.isClassic)).catch(() => undefined)
+
+        return { deny: 'back to the tree' }
+      }
+    }
+
     const result = await next(e)
 
     if (result.deny === undefined) {

@@ -49,6 +49,16 @@ const Limits = {
    */
   RIGHT_PAD_COLUMNS: 1,
   /**
+   * The body rows an inline pane asks for: as tall as its content, up to
+   * this, so a long tree leaves some of the conversation in view.
+   */
+  INLINE_ROWS: 40,
+  /**
+   * The terminal width from which Claude Code's fullscreen layout docks a
+   * pane beside the conversation; narrower, it seats the pane inline.
+   */
+  DOCK_MIN_COLUMNS: 110,
+  /**
    * The quiet time after Claude's last edit or command before an open pane
    * re-reads the tree.
    */

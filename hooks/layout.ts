@@ -92,3 +92,65 @@ export function regionAt(layout: PaneLayout, row: number): Region {
 
   return row < layout.previewRow ? 'preview-head' : 'preview'
 }
+
+/**
+ * What an inline pane shows, one view at a time: the tree, the file picked
+ * from it, or the help.
+ */
+export type InlineView = 'tree' | 'file' | 'help'
+
+/**
+ * The view an inline pane shows: the help while it is asked for, else the
+ * file while one is picked and shown, else the tree.
+ *
+ * @param state the help's state, whether the file view is shown, and the
+ *   picked file
+ * @returns the view
+ */
+export function inlineViewOf(state: {
+  readonly helpShown: boolean
+  readonly isFileShown: boolean
+  readonly selected: string | null
+}): InlineView {
+  if (state.helpShown) {
+    return 'help'
+  }
+
+  return state.isFileShown && state.selected !== null ? 'file' : 'tree'
+}
+
+/**
+ * How an inline pane's body is split: its header (the tree's, or the file's
+ * head row) and the one view under it, as tall as its content and at most
+ * what the room leaves. The frame of an inline pane fits what is drawn, so a
+ * short tree takes few rows. The help is drawn whole: taller than the room,
+ * Claude Code's window over the pane scrolls it.
+ *
+ * @param bodyRows the most rows the pane may take
+ * @param view the view shown
+ * @param contentRows the rows the view's content would take
+ * @returns the layout
+ */
+export function inlineLayoutOf(bodyRows: number, view: InlineView, contentRows: number): PaneLayout {
+  const room = Math.max(1, bodyRows - HEADER_ROWS)
+  const rows = Math.max(1, view === 'help' ? contentRows : Math.min(contentRows, room))
+
+  return {
+    bodyRows: HEADER_ROWS + rows,
+    treeRow: HEADER_ROWS,
+    treeRows: view === 'tree' ? rows : 0,
+    previewRow: view === 'file' ? HEADER_ROWS : HEADER_ROWS + rows,
+    previewRows: view === 'file' ? rows : 0,
+  }
+}
+
+/**
+ * Where closing an inline pane by hand (Esc, its close mark) takes it first:
+ * from the file or the help back to the tree; from the tree it closes.
+ *
+ * @param view the view shown
+ * @returns the view to step back to, or null to close
+ */
+export function escapeStepOf(view: InlineView): InlineView | null {
+  return view === 'tree' ? null : 'tree'
+}

@@ -31,31 +31,48 @@ claude --plugin-dir /path/to/cc-file-explorer
 
 ## Use
 
-Run `/tree` to open the pane, and again to close it. In fullscreen
-rendering (`/tui fullscreen`) the pane docks beside the transcript from 110
-columns; otherwise it opens above the prompt and Esc closes it.
+Run `/tree` to open the pane, and again to close it. Where it opens depends
+on how Claude Code draws:
+
+- **Docked beside the conversation**, under fullscreen rendering
+  (`/tui fullscreen`) on a terminal at least 110 columns wide. The tree and
+  the picked file's preview show together, and the mouse works.
+- **Above the prompt**, under Claude Code's classic renderer, or under
+  fullscreen on a narrower terminal. The pane is as tall as its content, up
+  to 40 rows, and shows one view at a time: the tree, the picked file, or
+  the help.
+  - Enter (or a click) shows a file in the tree's place.
+  - `x`, Esc or the close mark step back to the tree, and the file's row
+    keeps the focus. On the tree, Esc or the close mark closes the pane.
+  - The classic renderer has no mouse, so everything works from the keys.
+  - Ctrl+X ↑/↓ resizes the pane; Claude Code keeps that size for every pane
+    above the prompt.
+
+The first time `/tree` opens under the classic renderer, it leaves a one-line
+tip about `/tui fullscreen`, and never again. On a fullscreen terminal too
+narrow to dock the pane, it says once a session how wide the terminal must be.
 
 The header shows the tree's keys, `e: expand  c: collapse  r: refresh  h: help`,
-and a previewed file's row its own, `k: ↑  j: ↓  m: source  x: close`; `h` opens
-a help view with all of them.
+and a previewed file's row its own, `k: ↑  j: ↓  m: source  x: close` (`x: back`
+above the prompt); `h` opens a help view with all of them.
 
 | Do this | To |
 | --- | --- |
 | Click a folder, or focus it and press Enter | Expand or collapse it |
-| Click a file | Preview it under the tree |
+| Click a file, or focus it and press Enter | Preview it under the tree (docked), or in the tree's place (above the prompt) |
 | `e` | Open every folder in view one level deeper; repeat for more |
 | `c` | Close the deepest open folders, one level; repeat for more |
 | `1` – `9` | Open folders exactly that many levels deep |
 | `0` | Close every folder |
 | `r` | Re-read the tree and the previewed file at once |
 | `h` | Show or hide the help view |
-| Click the previewed file again, or press `x` | Close the preview |
+| Click the previewed file again (docked), or press `x` | Close the preview |
 | `m` | Switch a Markdown preview between rendered and source |
-| Wheel over the tree or the preview | Scroll that part alone, as far per notch as the conversation scrolls (`/scroll-speed`); the header stays put |
+| Wheel over the tree or the preview (fullscreen only) | Scroll that part alone, as far per notch as the conversation scrolls (`/scroll-speed`); the header stays put |
 | `j` / `k`, Page Up / Page Down | Scroll the preview |
 | Tab, Up, Down | Walk the tree; the tree scrolls with the focus, and Down stops at its last row |
 | Ctrl+X then an arrow | Resize the pane |
-| Esc | Return the keyboard to the prompt |
+| Esc | Docked, return the keyboard to the prompt; above the prompt under the classic renderer, step back to the tree, then close |
 
 `e` and the digits open at most 200 folders per press and say so when they
 stop early; press again to go further.
@@ -128,19 +145,21 @@ Known limits:
 | Event | What the hook does |
 | --- | --- |
 | `session.start` | Registers `/tree`; after a reload of the module, starts the checks again for a pane still open |
-| `command.run` of `tree` | Opens the pane, focused, and starts its checks for outside changes, or closes it when it is shown |
-| `ui.render` of the `Pane` | Draws the header, the tree's window and, set off by a blank row and a rule with the file's name, the preview's window, each exactly as tall as its region; reads what the drawing needs but lacks |
+| `command.run` of `tree` | Opens the pane on its tree, focused (above the prompt: up to 40 rows, closed by Esc under the classic renderer), and starts its checks for outside changes, or closes it when it is shown; leaves the one-time tip |
+| `ui.render` of the `Pane` | Draws for where the pane sits. Docked: the header, the tree's window and, set off by a blank row and a rule with the file's name, the preview's window, each exactly as tall as its region. Above the prompt: one view, the tree or the file or the help, as tall as its content. Reads what the drawing needs but lacks |
 | `ui.scroll` of the pane | Moves the tree's or the preview's own window by the region under the pointer, as far as the wheel's rows say; the engine's window over the pane stays still |
 | `ui.focus` in the pane | Keeps the focused row and its neighbors in view, so the arrows always have a drawn row to move to, and lands the focus where that row is drawn after the window moves; keeps the focus off the hidden digit keys |
-| `ui.close` of the pane | Stops the checks for outside changes |
+| `ui.close` of the pane | Above the prompt, a person's close steps back from the file or the help to the tree first; a close that goes through stops the checks for outside changes |
 | `tool.call` of `Write`, `Edit`, `NotebookEdit`, `Bash`, `PowerShell` | After a call that may have written (not held read-only, not denied), re-reads an open pane's tree and preview once Claude pauses |
 | `classic.SessionStart` after `/clear`, `/resume`, `/branch` | Forgets what was read, as the session state resets |
 
 It calls `$.session.root`, `$.fs.list`, `$.fs.stat`, `$.fs.read`,
 `$.clock.after`, `$.command.register`, `$.ui.open`, `$.ui.close`,
-`$.ui.panes`, `$.ui.resolve`, `$.ui.invalidate`, `$.ui.log`, `$.ui.toast` and
-its own `$.state`. It makes no network calls, starts no processes and writes
-no files.
+`$.ui.panes`, `$.ui.resolve`, `$.ui.invalidate`, `$.ui.log`, `$.ui.toast`,
+`$.store.get`, `$.store.set` and its own `$.state`. It makes no network
+calls, starts no processes and writes no files of its own; its one stored
+value, whether the fullscreen tip was shown, lives in the store Claude Code
+keeps for each plugin.
 `claude plugin validate .` prints the same list from the source.
 
 The person's view (open folders, the previewed file, where each window
