@@ -324,7 +324,7 @@ and the field's row counts the matches (`2/9`).
 | File | Preview |
 | --- | --- |
 | `.md`, `.markdown`, `.mdx` | Rendered Markdown, or its source with `m` |
-| `.csv`, `.tsv` | A table under its header row; long cells are cut at 32 columns |
+| `.csv`, `.tsv` | A table under its header row; long cells are cut at 32 columns, or shorter so the table fits the pane's width |
 | Any other text | Source with syntax colors by extension, and line numbers; long lines wrap, and the preview scrolls until the file's last line shows |
 | Binary, empty, over 2 MB | A notice in place of the text |
 

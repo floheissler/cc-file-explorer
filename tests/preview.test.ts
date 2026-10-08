@@ -7,10 +7,34 @@ import {
   markdownWindowOf,
   maxPreviewTop,
   parseDelimited,
+  previewHeightOf,
   previewOf,
+  tableHeightOf,
+  tableRowsIn,
   tableWindowOf,
 } from '../hooks/preview'
-import { formatBytes, sanitize, truncateMiddle } from '../hooks/text'
+import { cellWidth, formatBytes, sanitize, truncateMiddle } from '../hooks/text'
+
+/**
+ * The cells Claude Code draws a Markdown table's lines across: each
+ * column as wide as its widest cell (three at the least) and a space each
+ * side, between borders (checked live on 2.1.294). Escapes and bold marks
+ * take no cells.
+ */
+function drawnTableWidthOf(markdown: string): number {
+  const rows = markdown.split('\n').map(line =>
+    line
+      .slice(2, -2)
+      .split(/(?<!\\) \| /)
+      .map(cell => cell.replace(/\*\*/g, '').replace(/\\(.)/g, '$1')),
+  )
+
+  const widths = (rows[0] ?? []).map((_, at) =>
+    Math.max(3, ...rows.filter((_, row) => row !== 1).map(cells => cellWidth(cells[at] ?? ''))),
+  )
+
+  return widths.reduce((sum, width) => sum + width + 3, 1)
+}
 
 describe('previewOf', () => {
   test('reads Markdown, source and delimited files by their extension', async () => {
@@ -79,21 +103,62 @@ describe('preview windows', () => {
 
   test('draws a CSV window as a Markdown table under its header row', async () => {
     const rows = [['id', 'note'], ['1', 'a|b'], ['2', 'x'.repeat(40)]]
-    const table = tableWindowOf(rows, 1, 5)
+    const table = tableWindowOf(rows, 1, 5, 80)
 
     expect(table.split('\n')).toEqual([
       '| id | note |',
       '| --- | --- |',
       `| 2 | ${'x'.repeat(31)}… |`,
     ])
-    expect(tableWindowOf(rows, 0, 1)).toContain('a\\|b')
+    expect(tableWindowOf(rows, 0, 1, 80)).toContain('a\\|b')
+  })
+
+  test('cuts the widest columns’ cells until the table fits the row', async () => {
+    const rows = [
+      ['first column', 'second column', 'third column', 'fourth column'],
+      ['a'.repeat(30), 'b'.repeat(30), 'c'.repeat(30), 'd'.repeat(30)],
+      ['some words in a cell', 'more words in this one', 'short', 'the last cell has words too'],
+    ]
+
+    // Drawn whole, 133 cells across
+    expect(drawnTableWidthOf(tableWindowOf(rows, 0, 5, 200))).toBe(133)
+
+    for (const columns of [88, 60, 40, 30]) {
+      const table = tableWindowOf(rows, 0, 5, columns)
+
+      expect(drawnTableWidthOf(table), `${columns} columns`).toBeLessThanOrEqual(columns)
+    }
+
+    // A cell shorter than the cut stays whole
+    expect(tableWindowOf(rows, 0, 5, 40).split('\n')[3]).toContain('| short |')
+  })
+
+  test('cuts no cell below the three cells a column takes anyway', async () => {
+    const rows = [Array.from({ length: 12 }, (_, at) => `column ${at}`)]
+    const table = tableWindowOf(rows, 0, 5, 30)
+
+    // Too wide even then, it wraps, as each column takes 3 cells and its frame
+    expect(drawnTableWidthOf(table)).toBe(12 * 6 + 1)
+    expect(table.split('\n')[0]).toMatch(/^\| co… \| co… \|/)
+  })
+
+  test('measures a table at three rows of head and two a body row', async () => {
+    expect(tableHeightOf(0)).toBe(4)
+    expect(tableHeightOf(1)).toBe(5)
+    expect(tableHeightOf(3)).toBe(9)
+    expect(previewHeightOf(previewOf('a.csv', 0, 'name,note\nalpha,1\nbeta,2\ngamma,3\n'))).toBe(9)
+
+    expect(tableRowsIn(9)).toBe(3)
+    expect(tableRowsIn(10)).toBe(4)
+    expect(tableRowsIn(4)).toBe(1)
+    expect(tableRowsIn(2)).toBe(1)
   })
 
   test('bolds the marked row’s matching cells, their asterisks kept as text', async () => {
     const rows = [['id', 'note'], ['1', 'a*b'], ['2', 'a*b']]
     const mark = { row: 1, isMatch: (cell: string) => cell.includes('*') }
 
-    expect(tableWindowOf(rows, 0, 5, mark).split('\n')).toEqual([
+    expect(tableWindowOf(rows, 0, 5, 80, mark).split('\n')).toEqual([
       '| id | note |',
       '| --- | --- |',
       '| 1 | a*b |',

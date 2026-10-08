@@ -14,6 +14,7 @@ import {
   lengthOf,
   markdownWindowOf,
   sourceColumnsOf,
+  tableRowsIn,
   tableWindowOf,
   type Preview,
   type TableMark,
@@ -1158,7 +1159,13 @@ function previewBody(kit: Kit, model: PaneModel): RenderElement {
         </Text>
       )
     case 'table':
-      return <Markdown text={tableWindowOf(preview.rows, previewTop, rows, tableMarkOf(model.search))} />
+      // The rows the window shows, each with its rule, set the columns'
+      // widths, fitted to the row
+      return (
+        <Markdown
+          text={tableWindowOf(preview.rows, previewTop, tableRowsIn(rows), kit.columns, tableMarkOf(model.search))}
+        />
+      )
     case 'markdown':
       if (markdownMode === 'rendered') {
         // Markdown can draw a line in less than a row (a joined paragraph),
