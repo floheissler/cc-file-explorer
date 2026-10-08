@@ -324,6 +324,11 @@ when it loads the mod with `claude --plugin-dir .`; start one such session
 after a Claude Code update to refresh the types. The types file is the API
 reference for the running build: grep it for an event or method name.
 
+CI (`.github/workflows/ci.yml`) runs `validate --strict` and the tests on
+Ubuntu, Windows and macOS: on pushes to `main` and release tags, on pull
+requests, and nightly against the newest Claude Code. `tsc` stays local, as
+CI has no `.claude-plugin/types/`.
+
 Docs: https://code.claude.com/docs/en/plugins/mods/overview (create, interface,
 events, api, test, reference pages). Anthropic's own mods, including `/diff`,
 are at https://github.com/anthropics/claude-code/tree/main/mods.
