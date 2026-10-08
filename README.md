@@ -69,9 +69,8 @@ Keys work while the pane has the keyboard: click it, or press Ctrl+X then Tab.
 - The session's project root in Windows File Explorer's order: every folder
   before any file, and within each, dot names first and the rest sorted as
   people sort them (`file2` before `file10`).
-- In a git repository, everything `git check-ignore` does not ignore: untracked
-  files show, `node_modules/`, build output and the like do not. `.git` never
-  shows. Outside a repository, everything shows.
+- Every entry but `.git`, git-ignored ones (`node_modules/`, build output)
+  included, as other file explorers show them.
 - Up to 2,000 entries per folder; a note counts the rest.
 
 The tree and the open preview refresh shortly after Claude edits a file or
@@ -104,10 +103,10 @@ cannot send escape sequences to your terminal.
 | `classic.SessionStart` after `/clear`, `/resume`, `/branch` | Forgets what was read, as the session state resets |
 
 It calls `$.session.root`, `$.fs.list`, `$.fs.stat`, `$.fs.read`,
-`$.process.run` (`git rev-parse` and `git check-ignore`, read-only, with
-`GIT_OPTIONAL_LOCKS=0`), `$.clock.after`, `$.command.register`, `$.ui.open`,
-`$.ui.close`, `$.ui.panes`, `$.ui.resolve`, `$.ui.invalidate`, `$.ui.log`,
-`$.ui.toast` and its own `$.state`. It makes no network calls and writes no files.
+`$.clock.after`, `$.command.register`, `$.ui.open`, `$.ui.close`,
+`$.ui.panes`, `$.ui.resolve`, `$.ui.invalidate`, `$.ui.log`, `$.ui.toast` and
+its own `$.state`. It makes no network calls, starts no processes and writes
+no files.
 `claude plugin validate .` prints the same list from the source.
 
 The person's view (open folders, the previewed file, where each window

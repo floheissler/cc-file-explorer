@@ -6,23 +6,17 @@ import { formatBytes, messageOf } from './text'
 import { compareEntries, type DirListing, type Entry } from './tree'
 
 /**
- * The project's folders as read: the root they hang from, whether git
- * decides what is ignored there, and each folder read so far by its path.
+ * The project's folders as read: the root they hang from, and each folder
+ * read so far by its path.
  */
 export type Listing = {
   readonly root: string
-  readonly isGitRepo: boolean
   readonly dirs: Map<string, DirListing>
 }
 
 /**
- * Set over the session's environment for every git call: a read never takes
- * the index lock a commit running beside it needs.
- */
-const GIT_ENV = { GIT_OPTIONAL_LOCKS: '0' }
-
-/**
- * The folder git keeps its repository in: never listed.
+ * The folder git keeps its repository in: never listed, as no explorer
+ * lists it. Everything else is, git-ignored entries included.
  */
 const GIT_DIR_NAME = '.git'
 
@@ -33,58 +27,12 @@ const GIT_DIR_NAME = '.git'
  * @returns the listing
  */
 export async function openListing(host: Host): Promise<Listing> {
-  const root = await host.root()
-
-  return { root, isGitRepo: await isGitWorkTree(host, root), dirs: new Map() }
-}
-
-async function isGitWorkTree(host: Host, root: string): Promise<boolean> {
-  try {
-    const run = await host.run(['git', 'rev-parse', '--is-inside-work-tree'], {
-      cwd: root,
-      env: GIT_ENV,
-      timeoutMs: Limits.GIT_TIMEOUT_MS,
-    })
-
-    return run.exitCode === 0 && run.stdout.trim() === 'true'
-  } catch {
-    return false
-  }
+  return { root: await host.root(), dirs: new Map() }
 }
 
 /**
- * The paths among `paths` that git ignores. Tracked files are never
- * reported, as git treats them; where git cannot answer, none are.
- */
-async function ignoredAmong(
-  host: Host,
-  root: string,
-  paths: readonly string[],
-): Promise<ReadonlySet<string>> {
-  if (paths.length === 0) {
-    return new Set()
-  }
-
-  try {
-    const run = await host.run(['git', 'check-ignore', '-z', '--stdin'], {
-      cwd: root,
-      env: GIT_ENV,
-      stdin: `${paths.join('\0')}\0`,
-      timeoutMs: Limits.GIT_TIMEOUT_MS,
-    })
-
-    // 0: some are ignored; 1: none are; anything else: git could not tell.
-    return run.exitCode === 0
-      ? new Set(run.stdout.split('\0').filter(path => path !== ''))
-      : new Set()
-  } catch {
-    return new Set()
-  }
-}
-
-/**
- * Reads one folder: its entries less `.git` and what git ignores, in tree
- * order, up to the entry cap.
+ * Reads one folder: its entries less `.git`, in tree order, up to the entry
+ * cap.
  *
  * @param host the engine's calls
  * @param listing the listing the folder belongs to
@@ -107,16 +55,11 @@ export async function readDir(
         kind: entry.kind,
         size: entry.size,
       }))
-
-    const ignored = listing.isGitRepo
-      ? await ignoredAmong(host, listing.root, entries.map(entry => entry.path))
-      : new Set<string>()
-
-    const kept = entries.filter(entry => !ignored.has(entry.path)).sort(compareEntries)
+      .sort(compareEntries)
 
     return {
-      entries: kept.slice(0, Limits.MAX_DIR_ENTRIES),
-      truncated: Math.max(0, kept.length - Limits.MAX_DIR_ENTRIES),
+      entries: entries.slice(0, Limits.MAX_DIR_ENTRIES),
+      truncated: Math.max(0, entries.length - Limits.MAX_DIR_ENTRIES),
     }
   } catch (error) {
     return { error: messageOf(error) }

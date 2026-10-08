@@ -49,10 +49,6 @@ const PANE = {
   },
 } as const
 
-const ran = (stdout: string, exitCode = 0) => ({
-  value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
-})
-
 for (const surface of ['terminal', 'desktop'] as const) {
   test(`browses the tree and previews files (${surface})`, async ($, on) => {
     on('session.root', () => ({ value: ROOT }))
@@ -63,16 +59,6 @@ for (const surface of ['terminal', 'desktop'] as const) {
       value: { kind: 'file', size: FILES[e.path]?.length ?? 0, mtimeMs: 0, isLink: false },
     }))
     on('fs.read', ($, e) => ({ value: FILES[e.path] ?? '' }))
-    on('process.run', ($, e) => {
-      if (e.argv[1] === 'rev-parse') {
-        return ran('true\n')
-      }
-
-      // git check-ignore: node_modules is ignored, nothing else is
-      const asked = (e.init?.stdin ?? '').split('\0')
-
-      return asked.includes('node_modules') ? ran('node_modules\0') : ran('', 1)
-    })
 
     await $.command.run({
       command: 'tree',
@@ -83,10 +69,10 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     const ui = await $.ui.mount({ ...PANE, surface })
 
-    // The root lists folders first; .git and what git ignores are left out
+    // The root lists everything but .git, git-ignored folders included
     expect(await ui.find({ key: 'row:src' })).toBeDefined()
     expect(await ui.find({ key: 'row:README.md' })).toBeDefined()
-    expect(await ui.find({ key: 'row:node_modules' })).toBeUndefined()
+    expect(await ui.find({ key: 'row:node_modules' })).toBeDefined()
     expect(await ui.find({ key: 'row:.git' })).toBeUndefined()
 
     // A folder opens in place

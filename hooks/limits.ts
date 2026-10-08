@@ -58,12 +58,8 @@ const Limits = {
    */
   REFRESH_DEBOUNCE_MS: 300,
   /**
-   * How long one git call may run.
-   */
-  GIT_TIMEOUT_MS: 10_000,
-  /**
-   * Folders read at once: each read lists the folder and asks git what it
-   * ignores, so a level opened in a large repository runs this many at a time.
+   * Folders read at once, so a level opened in a large repository does not
+   * list hundreds of folders in one go.
    */
   READ_CONCURRENCY: 8,
   /**

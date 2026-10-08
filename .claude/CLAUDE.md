@@ -14,13 +14,14 @@ entry with `"source": "./"`). README.md has the user-facing behavior.
   `/plugin install file-explorer --marketplace floheissler/cc-file-explorer`.
 - `hooks/register.tsx`: the hooks module and the only file that touches `$`.
 - `hooks/host.ts`: the `Host` record the rest of the code takes instead of `$`.
-- `hooks/listing.ts`: reads folders (`$.fs.list` + `git check-ignore`) and files.
+- `hooks/listing.ts`: reads folders and files through `Host` (`$.fs`).
+  Everything but `.git` is listed, git-ignored entries included.
 - `hooks/tree.ts`, `levels.ts`, `layout.ts`, `preview.ts`, `text.ts`,
   `paths.ts`: pure logic. `levels.ts` holds the `e`/`c`/digit steps.
 - `hooks/view.tsx`: draws the pane from a `PaneModel`.
 - `types/index.d.ts`: the `$.state` contract (`PluginState['file-explorer']`).
 - `tests/`: `claude plugin test` suites; `pane.test.ts` mounts the pane on the
-  terminal and desktop surfaces with stubbed fs and git.
+  terminal and desktop surfaces with a stubbed file system.
 - `ROADMAP.md` (gitignored, local): the working plan toward a publishable
   release, a checklist with context for each item. Start there when asked to
   work on the next item.

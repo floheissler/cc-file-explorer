@@ -1,8 +1,6 @@
 import type {
   FsEntry,
   FsStat,
-  ProcessRunInit,
-  ProcessRunResult,
   Timer,
   UiPane,
 } from 'claude-code'
@@ -41,10 +39,6 @@ export type Host = {
    * The session's project root, absolute: the tree's root.
    */
   readonly root: () => Promise<string>
-  /**
-   * Runs a program (git) with no shell.
-   */
-  readonly run: (argv: string[], init: ProcessRunInit) => Promise<ProcessRunResult>
   readonly list: (path: string) => Promise<readonly FsEntry[]>
   readonly stat: (path: string) => Promise<FsStat>
   readonly read: (path: string) => Promise<string>

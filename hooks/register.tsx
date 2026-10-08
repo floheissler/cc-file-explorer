@@ -62,7 +62,6 @@ type Drawn = {
 function hostOf($: EngineInterface): Host {
   return {
     root: () => $.session.root(),
-    run: (argv, init) => $.process.run(argv, init),
     list: path => $.fs.list(path),
     stat: path => $.fs.stat(path),
     read: path => $.fs.read(path),
