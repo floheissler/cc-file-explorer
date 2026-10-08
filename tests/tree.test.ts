@@ -33,6 +33,22 @@ describe('compareEntries', () => {
 
     expect(sorted).toEqual(['Alpha', 'zeta', 'a.txt', 'B2.txt', 'b10.txt'])
   })
+
+  test('puts dot entries in a block on top: dot folders, then dotfiles', async () => {
+    const sorted = [
+      file('README.md'),
+      file('.gitignore'),
+      dir('src'),
+      dir('.github'),
+      file('a.txt'),
+      dir('.claude'),
+      file('.env'),
+    ]
+      .sort(compareEntries)
+      .map(entry => entry.name)
+
+    expect(sorted).toEqual(['.claude', '.github', '.env', '.gitignore', 'src', 'a.txt', 'README.md'])
+  })
 })
 
 describe('flattenTree', () => {

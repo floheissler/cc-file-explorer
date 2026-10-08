@@ -56,11 +56,16 @@ export function clamp(value: number, min: number, max: number): number {
 }
 
 /**
- * Tree order: folders first, then names as people sort them (`file2`
+ * Tree order: dot entries in a block on top (dot folders, then dotfiles),
+ * then folders, then files; within each, names as people sort them (`file2`
  * before `file10`, case aside), then by code point so the order is total.
+ *
+ * The dot block sits above the folders so that dotfiles never follow the
+ * last folder's open contents, where they would read as part of it.
  */
 export function compareEntries(a: Entry, b: Entry): number {
-  const rank = (entry: Entry) => (entry.kind === 'dir' ? 0 : 1)
+  const rank = (entry: Entry) =>
+    (entry.name.startsWith('.') ? 0 : 2) + (entry.kind === 'dir' ? 0 : 1)
 
   return (
     rank(a) - rank(b) ||
