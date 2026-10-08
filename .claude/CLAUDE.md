@@ -17,6 +17,9 @@ entry with `"source": "./"`). README.md has the user-facing behavior.
 - `hooks/listing.ts`: reads folders and files through `Host` (`$.fs`).
   Everything but `.git` is listed, git-ignored entries included.
 - `hooks/paths.ts`: the one place that turns tree keys into native paths.
+- `hooks/poll.ts`: pure logic of the checks for outside changes (which
+  folders, in what batches, which changed) and of which tool calls may have
+  written.
 - `hooks/tree.ts`, `levels.ts`, `layout.ts`, `preview.ts`, `text.ts`,
   `paths.ts`, `focus.ts`: pure logic. `levels.ts` holds the `e`/`c`/digit
   steps; `focus.ts` reads the focus order off a drawn tree and keeps the ring
@@ -105,6 +108,22 @@ the module otherwise:
 - Content in a clipped region (fixed `height`, `overflow="hidden"`) sits in a
   `flexShrink={0}` box: otherwise its rows shrink to fit and drop or
   overprint lines instead of being clipped.
+- Outside changes are polled, not watched: Claude Code offers no watcher a
+  mod can use, and inotify sees nothing on `/mnt/c` (checked 2026-10-08).
+  While the pane is open and shown, a chain of `$.clock.after` waits (never
+  `every`, whose slow callbacks overlap) stats the shown folders in bounded
+  batches, re-lists the ones whose mtime moved, and re-reads the previewed
+  file when its mtime or size moved. A poll never writes state. A listing
+  carries no folder's mtime (0 for folders), so each folder is stat'ed
+  before it is listed. An in-place edit moves only the file's mtime, not its
+  folder's.
+- Polls start in `command.run` and, as a reload cancels a module's waits
+  but keeps its pane, again in `session.start` when the pane is open; the
+  `ui.close` hook stops them, and a generation counter keeps a poll still
+  running from scheduling another. Poll tests need `mock.clock`.
+- Hooks that wrap `next` in `try/finally` (`tool.call`, `ui.close`) have no
+  `.catch`: its handler runs whenever the hook throws, a throw of `next`
+  included, and calls `next` again.
 - A wheel tick's `e.by` already carries the person's scroll speed
   (`CLAUDE_CODE_SCROLL_SPEED`, `/scroll-speed`): scroll by it as is, as the
   conversation does.

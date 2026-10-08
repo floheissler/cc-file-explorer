@@ -54,6 +54,21 @@ const Limits = {
    */
   REFRESH_DEBOUNCE_MS: 300,
   /**
+   * How often an open, shown pane polls the folders it shows and the
+   * previewed file for changes made outside Claude.
+   */
+  POLL_MS: 2_000,
+  /**
+   * Folders one poll stats at most, the root included; past it the open
+   * folders take turns.
+   */
+  MAX_POLL_STATS: 64,
+  /**
+   * Changed folders one poll lists again at most; the rest wait for the
+   * next poll.
+   */
+  MAX_POLL_RELISTS: 8,
+  /**
    * Folders read at once, so a level opened in a large repository does not
    * list hundreds of folders in one go.
    */

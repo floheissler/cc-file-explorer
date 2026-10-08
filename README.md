@@ -47,7 +47,7 @@ a help view with all of them.
 | `c` | Close the deepest open folders, one level; repeat for more |
 | `1` – `9` | Open folders exactly that many levels deep |
 | `0` | Close every folder |
-| `r` | Re-read the tree and the previewed file |
+| `r` | Re-read the tree and the previewed file at once |
 | `h` | Show or hide the help view |
 | Click the previewed file again, or press `x` | Close the preview |
 | `m` | Switch a Markdown preview between rendered and source |
@@ -76,8 +76,18 @@ Keys work while the pane has the keyboard: click it, or press Ctrl+X then Tab.
   as Claude Code measures them: CJK and most emoji take two, accents none, and
   a cut never splits a character.
 
-The tree and the open preview refresh shortly after Claude edits a file or
-runs a shell command. Press `r` after changes made outside the session.
+The tree and the open preview keep up with the disk:
+
+- Shortly after Claude edits a file or runs a shell command that may write
+  (not one the engine holds read-only, such as `ls` or `git status`), the
+  open folders and the previewed file are read again.
+- While the pane is shown, it checks the open folders and the previewed file
+  every 2 seconds, so changes from an editor, `git pull` or another terminal
+  appear within a few seconds. A check looks at at most 64 folders, the
+  rest taking turns, and lists again only the folders that changed. A
+  hidden or closed pane checks nothing.
+- A previewed file that is deleted shows a notice in place of its text, and
+  comes back if the file does.
 
 ### What the preview shows
 
@@ -117,12 +127,13 @@ Known limits:
 
 | Event | What the hook does |
 | --- | --- |
-| `session.start` | Registers `/tree` |
-| `command.run` of `tree` | Opens the pane, focused, or closes it when it is shown |
+| `session.start` | Registers `/tree`; after a reload of the module, starts the checks again for a pane still open |
+| `command.run` of `tree` | Opens the pane, focused, and starts its checks for outside changes, or closes it when it is shown |
 | `ui.render` of the `Pane` | Draws the header, the tree's window and, set off by a blank row and a rule with the file's name, the preview's window, each exactly as tall as its region; reads what the drawing needs but lacks |
 | `ui.scroll` of the pane | Moves the tree's or the preview's own window by the region under the pointer, as far as the wheel's rows say; the engine's window over the pane stays still |
 | `ui.focus` in the pane | Keeps the focused row and its neighbors in view, so the arrows always have a drawn row to move to, and lands the focus where that row is drawn after the window moves; keeps the focus off the hidden digit keys |
-| `tool.call` of `Write`, `Edit`, `NotebookEdit`, `Bash`, `PowerShell` | After the call, re-reads an open pane's tree and preview once Claude pauses |
+| `ui.close` of the pane | Stops the checks for outside changes |
+| `tool.call` of `Write`, `Edit`, `NotebookEdit`, `Bash`, `PowerShell` | After a call that may have written (not held read-only, not denied), re-reads an open pane's tree and preview once Claude pauses |
 | `classic.SessionStart` after `/clear`, `/resume`, `/branch` | Forgets what was read, as the session state resets |
 
 It calls `$.session.root`, `$.fs.list`, `$.fs.stat`, `$.fs.read`,

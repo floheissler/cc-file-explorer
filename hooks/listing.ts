@@ -1,3 +1,5 @@
+import type { FsStat } from 'claude-code'
+
 import type { Host } from './host'
 import Limits from './limits'
 import { depthOf, joinPath, nativePathOf } from './paths'
@@ -6,12 +8,26 @@ import { formatBytes, messageOf } from './text'
 import { compareEntries, type DirListing, type Entry } from './tree'
 
 /**
- * The project's folders as read: the root they hang from, and each folder
- * read so far by its path.
+ * The project's folders as read: the root they hang from, each folder read
+ * so far by its path, and the time each was modified when it was read.
  */
 export type Listing = {
   readonly root: string
   readonly dirs: Map<string, DirListing>
+  /**
+   * Each read folder's modification time, taken just before it was listed,
+   * so a change made while it was listed shows at the next check.
+   */
+  readonly stamps: Map<string, number>
+}
+
+/**
+ * A previewed file as read, and its stamp: its modification time and size
+ * when it was read, null where it could not be stat'ed.
+ */
+export type PreviewRead = {
+  readonly preview: Preview
+  readonly stamp: string | null
 }
 
 /**
@@ -27,7 +43,7 @@ const GIT_DIR_NAME = '.git'
  * @returns the listing
  */
 export async function openListing(host: Host): Promise<Listing> {
-  return { root: await host.root(), dirs: new Map() }
+  return { root: await host.root(), dirs: new Map(), stamps: new Map() }
 }
 
 /**
@@ -80,16 +96,82 @@ export async function readDirs(
 ): Promise<void> {
   for (let at = 0; at < dirs.length; at += Limits.READ_CONCURRENCY) {
     const batch = dirs.slice(at, at + Limits.READ_CONCURRENCY)
-    const read = await Promise.all(batch.map(dir => readDir(host, listing, dir)))
+
+    const read = await Promise.all(
+      batch.map(async dir => {
+        const stamp = await dirStampOf(host, listing, dir)
+
+        return { stamp, found: await readDir(host, listing, dir) }
+      }),
+    )
 
     batch.forEach((dir, index) => {
-      const found = read[index]
+      const done = read[index]
 
-      if (found !== undefined) {
-        listing.dirs.set(dir, found)
+      if (done === undefined) {
+        return
+      }
+
+      listing.dirs.set(dir, done.found)
+
+      if (done.stamp === null) {
+        listing.stamps.delete(dir)
+      } else {
+        listing.stamps.set(dir, done.stamp)
       }
     })
   }
+}
+
+/**
+ * A folder's modification time, or null where it cannot be stat'ed. A
+ * listing carries no folder's time (`FsEntry.mtimeMs` is 0 for folders), so
+ * each folder takes a stat of its own.
+ */
+async function dirStampOf(host: Host, listing: Listing, dir: string): Promise<number | null> {
+  return host.stat(nativePathOf(listing.root, dir)).then(
+    stat => stat.mtimeMs,
+    () => null,
+  )
+}
+
+/**
+ * Folders' modification times now, `READ_CONCURRENCY` at a time.
+ *
+ * @param host the engine's calls
+ * @param listing the listing the folders belong to
+ * @param dirs the folders, relative to the root
+ * @returns each folder's time, null where it cannot be stat'ed
+ */
+export async function stampDirs(
+  host: Host,
+  listing: Listing,
+  dirs: readonly string[],
+): Promise<Map<string, number | null>> {
+  const stamps = new Map<string, number | null>()
+
+  for (let at = 0; at < dirs.length; at += Limits.READ_CONCURRENCY) {
+    const batch = dirs.slice(at, at + Limits.READ_CONCURRENCY)
+    const read = await Promise.all(batch.map(dir => dirStampOf(host, listing, dir)))
+
+    batch.forEach((dir, index) => stamps.set(dir, read[index] ?? null))
+  }
+
+  return stamps
+}
+
+const stampOfStat = (stat: FsStat) => `${stat.mtimeMs}:${stat.size}`
+
+/**
+ * A file's stamp now: its modification time and size as one key.
+ *
+ * @param host the engine's calls
+ * @param root the project root
+ * @param path the file, relative to the root
+ * @returns the stamp, or null where the file cannot be stat'ed
+ */
+export async function fileStampOf(host: Host, root: string, path: string): Promise<string | null> {
+  return host.stat(nativePathOf(root, path)).then(stampOfStat, () => null)
 }
 
 /**
@@ -145,32 +227,38 @@ function isListedDir(listing: Listing, dir: string): boolean {
  * @param host the engine's calls
  * @param root the project root
  * @param path the file, relative to the root
- * @returns its preview
+ * @returns its preview, and its stamp from the stat taken before reading
  */
 export async function readPreview(
   host: Host,
   root: string,
   path: string,
-): Promise<Preview> {
+): Promise<PreviewRead> {
   const absolute = nativePathOf(root, path)
+  let stamp: string | null = null
 
   try {
     const stat = await host.stat(absolute)
 
+    stamp = stampOfStat(stat)
+
     if (stat.kind !== 'file') {
-      return noticeOf(path, stat.size, 'Not a regular file')
+      return { preview: noticeOf(path, stat.size, 'Not a regular file'), stamp }
     }
 
     if (isKnownBinary(path)) {
-      return noticeOf(path, stat.size, `Binary file · ${formatBytes(stat.size)}`)
+      return { preview: noticeOf(path, stat.size, `Binary file · ${formatBytes(stat.size)}`), stamp }
     }
 
     if (stat.size > Limits.MAX_PREVIEW_BYTES) {
-      return noticeOf(path, stat.size, `Too large to preview · ${formatBytes(stat.size)}`)
+      return {
+        preview: noticeOf(path, stat.size, `Too large to preview · ${formatBytes(stat.size)}`),
+        stamp,
+      }
     }
 
-    return previewOf(path, stat.size, await host.read(absolute))
+    return { preview: previewOf(path, stat.size, await host.read(absolute)), stamp }
   } catch (error) {
-    return noticeOf(path, 0, `Can't read this file: ${messageOf(error)}`)
+    return { preview: noticeOf(path, 0, `Can't read this file: ${messageOf(error)}`), stamp }
   }
 }

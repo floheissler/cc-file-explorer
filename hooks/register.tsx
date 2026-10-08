@@ -1,14 +1,23 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, Timer } from 'claude-code'
+import type { EngineInterface, Register, Timer, ToolCallResult } from 'claude-code'
 
 import { focusOrderOf, focusStepOf, type FocusOrder } from './focus'
 import type { Host } from './host'
 import { paneLayoutOf, regionAt, type PaneLayout } from './layout'
 import Limits from './limits'
 import { collapseOneLevel, expandOneLevel, expandToDepth } from './levels'
-import { openListing, readDirs, readPreview, readTree, type Listing } from './listing'
+import {
+  fileStampOf,
+  openListing,
+  readDirs,
+  readPreview,
+  readTree,
+  stampDirs,
+  type Listing,
+} from './listing'
 import { COMMAND_DESCRIPTION, PANE_TITLE, ROW_KEY_PREFIX } from './names'
 import { rootLabelOf } from './paths'
+import { changedDirsOf, mayHaveWritten, pollBatchOf, shownDirsOf } from './poll'
 import { maxPreviewTop, type Preview } from './preview'
 import { messageOf } from './text'
 import {
@@ -142,6 +151,21 @@ export const register: Register = on => {
   let lastFocused: string | undefined
 
   /**
+   * The previewed file's stamp when it was read, and whether `refresh` is
+   * reading the tree: a poll leaves the disk alone while it is.
+   */
+  let previewStamp: { readonly path: string; readonly stamp: string | null } | null = null
+  let isRefreshing = false
+
+  /**
+   * The polls for changes made outside Claude, while the pane is open: one
+   * pending wait at a time, each poll scheduling the next as it ends, so
+   * polls never overlap. A stop moves `generation` on, so a poll still
+   * running when the pane closed schedules nothing.
+   */
+  const polling = { isOn: false, generation: 0, cursor: 0, timer: null as Timer | null }
+
+  /**
    * Drops what was read, so the next drawing reads the project afresh.
    */
   const forget = () => {
@@ -149,8 +173,10 @@ export const register: Register = on => {
     listingLoad = null
     preview = null
     previewLoad = null
+    previewStamp = null
     drawn = null
     dirLoads.clear()
+    polling.cursor = 0
   }
 
   /**
@@ -212,7 +238,8 @@ export const register: Register = on => {
       const loaded = await readPreview(host, opened.root, path)
 
       if (previewLoad === path) {
-        preview = loaded
+        preview = loaded.preview
+        previewStamp = { path, stamp: loaded.stamp }
       }
     } finally {
       if (previewLoad === path) {
@@ -281,7 +308,14 @@ export const register: Register = on => {
 
     const opened = await openListing(host)
 
-    await readTree(host, opened, await host.state.expanded.get())
+    isRefreshing = true
+
+    try {
+      await readTree(host, opened, await host.state.expanded.get())
+    } finally {
+      isRefreshing = false
+    }
+
     listing = opened
 
     const selected = await host.state.selected.get()
@@ -291,6 +325,112 @@ export const register: Register = on => {
     }
 
     host.invalidate()
+  }
+
+  /**
+   * Re-reads the previewed file when its time or size moved since it was
+   * read: deleted, it shows the read's notice, and comes back when the file
+   * does.
+   *
+   * @returns whether the preview was read again
+   */
+  const pollPreview = async (host: Host, current: Listing): Promise<boolean> => {
+    const selected = await host.state.selected.get()
+
+    if (selected === null || previewLoad !== null || previewStamp?.path !== selected) {
+      return false
+    }
+
+    if ((await fileStampOf(host, current.root, selected)) === previewStamp.stamp) {
+      return false
+    }
+
+    await loadPreview(host, selected)
+
+    return true
+  }
+
+  /**
+   * One poll: the shown folders' times, a bounded batch taking turns past
+   * the cap; the changed ones listed again, a bounded few; and the previewed
+   * file. A poll never writes state.
+   *
+   * @returns whether anything drawn changed
+   */
+  const pollOnce = async (host: Host, current: Listing): Promise<boolean> => {
+    const rows = flattenTree(dir => current.dirs.get(dir), new Set(await host.state.expanded.get()))
+    const shown = shownDirsOf(rows).filter(dir => !dirLoads.has(dir))
+    const { batch, cursor } = pollBatchOf(shown, polling.cursor, Limits.MAX_POLL_STATS)
+
+    polling.cursor = cursor
+
+    const now = await stampDirs(host, current, batch)
+    const changed = changedDirsOf(batch, current.stamps, now).slice(0, Limits.MAX_POLL_RELISTS)
+
+    await readDirs(host, current, changed)
+
+    const isPreviewRead = await pollPreview(host, current)
+
+    return changed.length > 0 || isPreviewRead
+  }
+
+  /**
+   * Runs one poll, then schedules the next after the poll interval, or twice
+   * the poll's own time when that is longer, which keeps the polls' share of
+   * the disk's time bounded on a slow file system. Nothing is read while the
+   * pane is hidden, or while the tree is being read anyway.
+   */
+  const runPoll = async (host: Host, generation: number) => {
+    const started = Date.now()
+
+    try {
+      const pane = (await host.panes()).find(open => open.id === PANE_ID)
+
+      if (pane === undefined) {
+        stopPolling()
+
+        return
+      }
+
+      const current = listing
+      const isBusy = isRefreshing || listingLoad !== null || previewLoad !== null
+
+      if (pane.isShown && current !== null && !isBusy && (await pollOnce(host, current))) {
+        if (listing === current) {
+          host.invalidate()
+        }
+      }
+    } catch {
+      // A failed poll waits for the next one
+    } finally {
+      if (polling.isOn && generation === polling.generation) {
+        schedulePoll(host, generation, Math.max(Limits.POLL_MS, 2 * (Date.now() - started)))
+      }
+    }
+  }
+
+  const schedulePoll = (host: Host, generation: number, ms: number) => {
+    polling.timer = host.after(ms, () => {
+      polling.timer = null
+      void runPoll(host, generation)
+    })
+  }
+
+  const startPolling = (host: Host) => {
+    if (polling.isOn) {
+      return
+    }
+
+    polling.isOn = true
+    polling.generation += 1
+    schedulePoll(host, polling.generation, Limits.POLL_MS)
+  }
+
+  const stopPolling = () => {
+    polling.isOn = false
+    polling.generation += 1
+    polling.timer?.cancel()
+    polling.timer = null
   }
 
   const scheduleRefresh = (host: Host) => {
@@ -321,7 +461,12 @@ export const register: Register = on => {
       const opened = await ensureListing(host)
       const isOpen = (await host.state.expanded.get()).includes(path)
 
-      if (!isOpen && !opened.dirs.has(path)) {
+      // A folder read before is read again when it changed while closed,
+      // as the polls only look at open folders
+      const isStale = async () =>
+        (await stampDirs(host, opened, [path])).get(path) !== opened.stamps.get(path)
+
+      if (!isOpen && (!opened.dirs.has(path) || (await isStale()))) {
         await readDirs(host, opened, [path])
       }
 
@@ -417,6 +562,16 @@ export const register: Register = on => {
       $.ui.log(`file-explorer: could not register /${COMMAND_NAME}: ${messageOf(error)}`)
     }
 
+    // A reload of the module cancels its waits but keeps the pane open: an
+    // open pane's polls start again
+    try {
+      if ((await $.ui.panes()).some(pane => pane.id === PANE_ID)) {
+        startPolling(hostOf($))
+      }
+    } catch {
+      // The next /tree starts them
+    }
+
     return next(e)
   })
 
@@ -443,6 +598,7 @@ export const register: Register = on => {
     const base = { id: PANE_ID, title: PANE_TITLE, focus: true } as const
 
     await $.ui.open(isInline ? { ...base, closeOnEscape: true } : base)
+    startPolling(hostOf($))
 
     return {}
   })
@@ -615,21 +771,47 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   /**
-   * After a tool call that can change files, an open pane re-reads what it
-   * shows once Claude pauses: an edit, or a shell command (Bash, or
-   * PowerShell on native Windows). The hook only watches: a failure in it
-   * lets the call's own result through.
+   * The pane closing, by `/tree`, its close mark or a key: the polls stop.
+   * No `.catch`: a throw of `next` passes on as it came, never run twice.
+   */
+  on('ui.close', { id: 'file-explorer' }, async ($, e, next) => {
+    const result = await next(e)
+
+    if (result.deny === undefined) {
+      stopPolling()
+    }
+
+    return result
+  })
+
+  /**
+   * After a tool call that may have changed files, an open pane re-reads
+   * what it shows once Claude pauses: an edit, or a shell command (Bash, or
+   * PowerShell on native Windows) the engine did not hold read-only. A call
+   * that threw may have written too.
+   *
+   * The hook only watches. It has no `.catch`, whose handler would run the
+   * call again after a throw of `next`: that throw passes on as it came, and
+   * scheduling the refresh cannot throw.
    *
    * PowerShell is matched by pattern: only Windows builds have the tool, so
    * the tool names other builds type the matcher with leave it out.
    */
   on('tool.call', { tool: ['Write', 'Edit', 'NotebookEdit', 'Bash', /^PowerShell$/] }, async ($, e, next) => {
-    const result = await next(e)
+    let result: ToolCallResult | undefined
 
-    if (listing !== null) {
-      scheduleRefresh(hostOf($))
+    try {
+      result = await next(e)
+
+      return result
+    } finally {
+      if (listing !== null && mayHaveWritten(result)) {
+        try {
+          scheduleRefresh(hostOf($))
+        } catch {
+          // The call's own outcome stands
+        }
+      }
     }
-
-    return result
-  }).catch(($, e, next) => next(e))
+  })
 }
