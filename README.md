@@ -6,7 +6,7 @@ A file explorer pane for Claude Code. `/tree` opens your project beside the
 conversation, so you can browse it, preview files and hand them to Claude
 without leaving the session.
 
-<!-- Screenshot or short GIF of the docked pane goes here. -->
+![/tree docked beside a Claude Code conversation: the project tree with git markers, a file preview that follows the focus, and the filter finding a CSV file shown as a table](docs/demo.gif)
 
 - **Browse** the project as a tree you expand and collapse in place, with the
   mouse or the keys.

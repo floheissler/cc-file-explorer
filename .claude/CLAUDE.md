@@ -59,6 +59,9 @@ entry with `"source": "./"`). README.md has the user-facing behavior.
   and `git.test.ts` the markers with git stubbed too. An unstubbed `process.run` rejects, as git missing does: the
   other suites draw no git markers. A stub answers by `argv[1]`
   (`ls-files`, `rev-parse`, `status`), as both features run git.
+- `docs/demo.gif`: the README's demo, 1920 px wide and under 1 MB. Every
+  install copies the whole repository, this file included, so keep a new
+  recording as small (half a 4K capture, one shared 256-color palette).
 - `ROADMAP.md` (gitignored, local): the working plan toward a publishable
   release, a checklist with context for each item. Start there when asked to
   work on the next item.
