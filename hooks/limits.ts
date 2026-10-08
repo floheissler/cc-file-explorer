@@ -7,7 +7,7 @@
  */
 const Limits = {
   /**
-   * Lines one press of `j` or `k` moves the preview.
+   * Lines one press of `w` or `s` moves the preview.
    */
   KEY_ROWS: 3,
   /**

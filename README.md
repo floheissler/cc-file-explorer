@@ -146,7 +146,7 @@ descriptions wrap to the width.
 | Click the previewed file again (docked), or press `x` | Close the preview |
 | `m` | Switch a Markdown preview between rendered and source |
 | Wheel over the tree or the preview (fullscreen only) | Scroll that part alone, as far per notch as the conversation scrolls (`/scroll-speed`); the header stays put |
-| `j` / `k`, Page Up / Page Down | Scroll the preview |
+| `w` / `s`, Page Up / Page Down | Scroll the preview |
 | Tab, Up, Down | Walk the tree; the focus comes in at its first row, Up from there reaches the header's controls, the tree scrolls with the focus, and Down stops at its last row |
 | Ctrl+X then an arrow | Resize the pane |
 | Esc | Docked, return the keyboard to the prompt; above the prompt under the classic renderer, step back to the tree, then close |

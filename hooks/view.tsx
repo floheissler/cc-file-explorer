@@ -408,7 +408,7 @@ function helpSectionsOf(seat: Seat): readonly HelpSection[] {
       ['r', 're-read the tree and the preview'],
       ['f', 'filter the tree by name as you type; again to clear'],
       ['a', 'mention the focused row to Claude at the prompt (@path), else the previewed file'],
-      ['j  k', 'scroll the preview down, up'],
+      ['w  s', 'scroll the preview up, down'],
       ['m', 'Markdown preview: rendered or source'],
       ['x', isInline ? 'close the file, back to the tree' : 'close the preview'],
       ['h', 'show or hide this help'],
@@ -908,8 +908,8 @@ function previewControlsOf(
   return [
     ...(isScrollable
       ? [
-          { key: KEYS.previewUp, hotkey: 'k', label: '↑', onPress: () => kit.actions.scrollPreview(-1) },
-          { key: KEYS.previewDown, hotkey: 'j', label: '↓', onPress: () => kit.actions.scrollPreview(1) },
+          { key: KEYS.previewUp, hotkey: 'w', label: '↑', onPress: () => kit.actions.scrollPreview(-1) },
+          { key: KEYS.previewDown, hotkey: 's', label: '↓', onPress: () => kit.actions.scrollPreview(1) },
         ]
       : []),
     ...(isMarkdown
