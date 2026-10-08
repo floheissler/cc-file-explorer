@@ -61,6 +61,16 @@ const Limits = {
    * How long one git call may run.
    */
   GIT_TIMEOUT_MS: 10_000,
+  /**
+   * Folders read at once: each read lists the folder and asks git what it
+   * ignores, so a level opened in a large repository runs this many at a time.
+   */
+  READ_CONCURRENCY: 8,
+  /**
+   * Folders one press of `e` or a digit opens at most; past it the press
+   * stops and says so.
+   */
+  MAX_LEVEL_FOLDERS: 200,
 } as const
 
 export default Limits

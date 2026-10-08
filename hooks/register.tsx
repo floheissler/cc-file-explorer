@@ -4,6 +4,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 import type { Host } from './host'
 import { paneLayoutOf, regionAt, type PaneLayout } from './layout'
 import Limits from './limits'
+import { collapseOneLevel, expandOneLevel, expandToDepth } from './levels'
 import { openListing, readDirs, readPreview, readTree, type Listing } from './listing'
 import { COMMAND_DESCRIPTION, PANE_TITLE, ROW_KEY_PREFIX } from './names'
 import { baseName } from './paths'
@@ -41,6 +42,7 @@ const SELECTED = atom({ plugin: 'file-explorer', key: 'selected' } as const, nul
 const TREE_TOP = atom({ plugin: 'file-explorer', key: 'treeTop' } as const, 0)
 const PREVIEW_TOP = atom({ plugin: 'file-explorer', key: 'previewTop' } as const, 0)
 const MARKDOWN_MODE = atom({ plugin: 'file-explorer', key: 'markdownMode' } as const, 'rendered')
+const HELP_SHOWN = atom({ plugin: 'file-explorer', key: 'helpShown' } as const, false)
 
 /**
  * What the last drawing laid out: the scroll and focus hooks steer by it.
@@ -67,6 +69,7 @@ function hostOf($: EngineInterface): Host {
     panes: () => $.ui.panes(),
     invalidate: () => $.ui.invalidate('ui.render'),
     after: (ms, fn) => $.clock.after(ms, fn),
+    toast: text => $.ui.toast(text),
     state: {
       expanded: {
         get: () => read($, EXPANDED),
@@ -96,6 +99,12 @@ function hostOf($: EngineInterface): Host {
         get: () => read($, MARKDOWN_MODE),
         set: async fn => {
           await update($, MARKDOWN_MODE, fn)
+        },
+      },
+      helpShown: {
+        get: () => read($, HELP_SHOWN),
+        set: async fn => {
+          await update($, HELP_SHOWN, fn)
         },
       },
     },
@@ -283,6 +292,21 @@ export const register: Register = on => {
     })
   }
 
+  /**
+   * Level steps run one after another, so presses in quick succession each
+   * start from the tree the last one left.
+   */
+  let levelSteps: Promise<void> = Promise.resolve()
+
+  const runLevelStep = (step: () => Promise<void>): Promise<void> => {
+    levelSteps = levelSteps.then(step).catch(() => undefined)
+
+    return levelSteps
+  }
+
+  const cappedText = (key: string) =>
+    `Opened ${Limits.MAX_LEVEL_FOLDERS} folders, the most one step opens; press ${key} again for more`
+
   const actionsOf = (host: Host): PaneActions => ({
     toggleDir: async path => {
       const opened = await ensureListing(host)
@@ -312,9 +336,54 @@ export const register: Register = on => {
 
     scrollPreview: lines => scrollPreviewBy(host, lines * Limits.KEY_ROWS),
 
-    collapseAll: async () => {
-      await host.state.expanded.set(() => [])
-      await host.state.treeTop.set(() => 0)
+    expandLevel: () =>
+      runLevelStep(async () => {
+        const opened = await ensureListing(host)
+        const step = await expandOneLevel(
+          dir => opened.dirs.get(dir),
+          new Set(await host.state.expanded.get()),
+          dirs => readDirs(host, opened, dirs),
+          Limits.MAX_LEVEL_FOLDERS,
+        )
+
+        await host.state.expanded.set(() => step.expanded)
+
+        if (step.isCapped) {
+          host.toast(cappedText('e'))
+        }
+      }),
+
+    collapseLevel: () =>
+      runLevelStep(async () => {
+        const opened = await ensureListing(host)
+        const open = collapseOneLevel(
+          dir => opened.dirs.get(dir),
+          new Set(await host.state.expanded.get()),
+        )
+
+        await host.state.expanded.set(() => open)
+      }),
+
+    showDepth: levels =>
+      runLevelStep(async () => {
+        const opened = await ensureListing(host)
+        const step = await expandToDepth(
+          dir => opened.dirs.get(dir),
+          levels,
+          dirs => readDirs(host, opened, dirs),
+          Limits.MAX_LEVEL_FOLDERS,
+        )
+
+        await host.state.expanded.set(() => step.expanded)
+        await host.state.treeTop.set(() => 0)
+
+        if (step.isCapped) {
+          host.toast(`Opened ${Limits.MAX_LEVEL_FOLDERS} folders, the most one step opens`)
+        }
+      }),
+
+    toggleHelp: async () => {
+      await host.state.helpShown.set(shown => !shown)
     },
 
     toggleMarkdownMode: async () => {
@@ -376,12 +445,13 @@ export const register: Register = on => {
     const host = hostOf($)
     const { Box, Text, Button, Code, Markdown } = $.ui.resolve(e)
 
-    const [expanded, selected, treeTop, previewTop, markdownMode] = await Promise.all([
+    const [expanded, selected, treeTop, previewTop, markdownMode, helpShown] = await Promise.all([
       read($, EXPANDED),
       read($, SELECTED),
       read($, TREE_TOP),
       read($, PREVIEW_TOP),
       read($, MARKDOWN_MODE),
+      read($, HELP_SHOWN),
     ])
 
     const current = listing
@@ -423,7 +493,9 @@ export const register: Register = on => {
     const layout = paneLayoutOf(e.props.scroll.bodyRows, selected !== null)
     const window = treeWindowOf(rows.length, treeTop, layout.treeRows)
 
-    drawn = { rows, layout }
+    // The help view stands in for the tree: the scroll and focus hooks then
+    // have no rows to steer
+    drawn = helpShown ? null : { rows, layout }
 
     return paneView(
       { Box, Text, Button, Code, Markdown },
@@ -438,6 +510,7 @@ export const register: Register = on => {
         preview: isPreviewStale ? null : preview,
         previewTop,
         markdownMode,
+        helpShown,
       },
     )
   })

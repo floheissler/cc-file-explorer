@@ -124,7 +124,7 @@ export async function readDir(
 }
 
 /**
- * Reads folders into a listing, all at once.
+ * Reads folders into a listing, `READ_CONCURRENCY` at a time.
  *
  * @param host the engine's calls
  * @param listing the listing to fill
@@ -135,15 +135,18 @@ export async function readDirs(
   listing: Listing,
   dirs: readonly string[],
 ): Promise<void> {
-  const read = await Promise.all(dirs.map(dir => readDir(host, listing, dir)))
+  for (let at = 0; at < dirs.length; at += Limits.READ_CONCURRENCY) {
+    const batch = dirs.slice(at, at + Limits.READ_CONCURRENCY)
+    const read = await Promise.all(batch.map(dir => readDir(host, listing, dir)))
 
-  dirs.forEach((dir, at) => {
-    const found = read[at]
+    batch.forEach((dir, index) => {
+      const found = read[index]
 
-    if (found !== undefined) {
-      listing.dirs.set(dir, found)
-    }
-  })
+      if (found !== undefined) {
+        listing.dirs.set(dir, found)
+      }
+    })
+  }
 }
 
 /**

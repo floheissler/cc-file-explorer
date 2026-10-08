@@ -5,7 +5,7 @@ import type { ElementTable, RenderElement } from 'claude-code'
 
 import type { MarkdownMode } from '../types'
 import type { PaneLayout } from './layout'
-import { KEYS, ROW_KEY_PREFIX } from './names'
+import { depthKeyOf, KEYS, ROW_KEY_PREFIX } from './names'
 import { baseName } from './paths'
 import {
   codeWindowOf,
@@ -32,7 +32,19 @@ export type Ui = Pick<
 export type PaneActions = {
   toggleDir: (path: string) => Promise<void>
   selectFile: (path: string) => Promise<void>
-  collapseAll: () => Promise<void>
+  /**
+   * Opens every closed folder in view, one level deeper everywhere.
+   */
+  expandLevel: () => Promise<void>
+  /**
+   * Closes every open folder in view that holds no open folder.
+   */
+  collapseLevel: () => Promise<void>
+  /**
+   * Opens folders exactly `levels` deep; 0 closes every folder.
+   */
+  showDepth: (levels: number) => Promise<void>
+  toggleHelp: () => Promise<void>
   scrollPreview: (lines: number) => Promise<void>
   toggleMarkdownMode: () => Promise<void>
   closePreview: () => Promise<void>
@@ -54,6 +66,10 @@ export type PaneModel = {
   readonly preview: Preview | null
   readonly previewTop: number
   readonly markdownMode: MarkdownMode
+  /**
+   * Whether the help view stands in for the tree and the preview.
+   */
+  readonly helpShown: boolean
 }
 
 /**
@@ -69,9 +85,11 @@ type Kit = {
 }
 
 /**
- * The pane's tree: the header, the tree's window, and while a file is
- * selected its preview. Each region is exactly as tall as the layout says,
- * so the drawing fits the body and the arrows walk the rows.
+ * The pane's tree: the header, then the help view, or the tree's window and
+ * while a file is selected its preview. Each region is exactly as tall as
+ * the layout says, so the drawing fits the body and the arrows walk the rows.
+ * The keys the header does not show sit in a hidden box, which draws nothing
+ * and keeps their hotkeys armed.
  *
  * @param ui the surface's elements
  * @param actions what the controls do
@@ -88,6 +106,16 @@ export function paneView(
   const { Box } = ui
   const kit: Kit = { ui, actions, columns }
 
+  if (model.helpShown) {
+    return (
+      <Box flexDirection="column" width={columns}>
+        {headerRow(kit, model)}
+        {helpRegion(kit, model.layout.bodyRows - 1)}
+        {hiddenKeys(kit, model)}
+      </Box>
+    )
+  }
+
   return (
     <Box flexDirection="column" width={columns}>
       {headerRow(kit, model)}
@@ -96,13 +124,122 @@ export function paneView(
       {model.selected !== null && previewTitleRow(kit, model.selected)}
       {model.selected !== null && previewMetaRow(kit, model)}
       {model.selected !== null && previewRegion(kit, model)}
+      {hiddenKeys(kit, model)}
+    </Box>
+  )
+}
+
+/**
+ * The hotkeys listed in the help view but not in the header: the digits
+ * that set the tree's depth, and while a file is previewed `j` and `k`. A
+ * `display: 'none'` box draws nothing, and Claude Code still arms the
+ * hotkeys of the Buttons in it (checked on 2.1.293).
+ */
+function hiddenKeys(kit: Kit, model: PaneModel): RenderElement {
+  const { Box, Button } = kit.ui
+  const isScrollable = !model.helpShown && model.preview !== null && lengthOf(model.preview) > 0
+
+  return (
+    <Box display="none">
+      {DIGITS.map(levels => (
+        <Button
+          key={depthKeyOf(levels)}
+          label={levels === 0 ? 'collapse all' : `open ${levels} deep`}
+          hotkey={String(levels)}
+          plain
+          onPress={() => kit.actions.showDepth(levels)}
+        />
+      ))}
+      {isScrollable && (
+        <Button
+          key={KEYS.previewUp}
+          label="scroll up"
+          hotkey="k"
+          plain
+          onPress={() => kit.actions.scrollPreview(-1)}
+        />
+      )}
+      {isScrollable && (
+        <Button
+          key={KEYS.previewDown}
+          label="scroll down"
+          hotkey="j"
+          plain
+          onPress={() => kit.actions.scrollPreview(1)}
+        />
+      )}
+    </Box>
+  )
+}
+
+const DIGITS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as const
+
+/**
+ * Every key and pointer action, grouped, as the help view lists them.
+ */
+const HELP: readonly { readonly title: string; readonly rows: readonly (readonly [string, string])[] }[] = [
+  {
+    title: 'Keys, while the pane has the keyboard (click it, or Ctrl+X then Tab)',
+    rows: [
+      ['e', 'open every folder in view one level deeper'],
+      ['c', 'close the deepest open folders, one level'],
+      ['1 – 9', 'open folders exactly that many levels deep'],
+      ['0', 'close every folder'],
+      ['r', 're-read the tree and the preview'],
+      ['j  k', 'scroll the preview down, up'],
+      ['m', 'Markdown preview: rendered or source'],
+      ['x', 'close the preview'],
+      ['h', 'show or hide this help'],
+      ['Tab ↑ ↓', 'move between rows; Enter opens'],
+    ],
+  },
+  {
+    title: 'Mouse',
+    rows: [
+      ['click', 'open a folder, preview a file; again to close it'],
+      ['wheel', 'scroll the tree or the preview under the pointer'],
+    ],
+  },
+  {
+    title: 'Pane',
+    rows: [
+      ['Ctrl+X ← →', 'resize'],
+      ['Ctrl+X X', 'close'],
+      ['Esc', 'give the keyboard back to the prompt'],
+    ],
+  },
+]
+
+const HELP_KEY_COLUMNS = 12
+
+function helpRegion(kit: Kit, rows: number): RenderElement {
+  const { Box, Text } = kit.ui
+  const room = Math.max(1, kit.columns - HELP_KEY_COLUMNS)
+
+  return (
+    <Box flexDirection="column" height={Math.max(1, rows)} overflow="hidden">
+      {HELP.flatMap((section, at) => [
+        ...(at > 0 ? [<Box height={1} />] : []),
+        <Text bold wrap="truncate-end">
+          {section.title}
+        </Text>,
+        ...section.rows.map(([keys, does]) => (
+          <Box flexDirection="row" height={1}>
+            <Text color="suggestion">{padEnd(keys, HELP_KEY_COLUMNS)}</Text>
+            <Text dimColor wrap="truncate-end">
+              {truncateEnd(does, room)}
+            </Text>
+          </Box>
+        )),
+      ])}
     </Box>
   )
 }
 
 function headerRow(kit: Kit, model: PaneModel): RenderElement {
   const { Box, Text, Button } = kit.ui
-  const controls = 'c: collapse r: refresh'
+  const helpLabel = model.helpShown ? 'back' : 'help'
+  const controls = `e: expand c: collapse r: refresh h: ${helpLabel}`
   const nameRoom = Math.max(4, kit.columns - controls.length - 2)
 
   return (
@@ -112,12 +249,28 @@ function headerRow(kit: Kit, model: PaneModel): RenderElement {
       </Text>
       <Box flexGrow={1} />
       <Button
-        key={KEYS.collapseAll}
+        key={KEYS.expandLevel}
+        label="expand"
+        hotkey="e"
+        plain
+        dimColor
+        onPress={kit.actions.expandLevel}
+      />
+      <Button
+        key={KEYS.collapseLevel}
         label="collapse"
         hotkey="c"
         plain
         dimColor
-        onPress={kit.actions.collapseAll}
+        onPress={kit.actions.collapseLevel}
+      />
+      <Button
+        key={KEYS.help}
+        label={helpLabel}
+        hotkey="h"
+        plain
+        dimColor
+        onPress={kit.actions.toggleHelp}
       />
       <Button
         key={KEYS.refresh}
@@ -247,10 +400,14 @@ function metaTextOf(preview: Preview | null, markdownMode: MarkdownMode): string
   }
 }
 
+/**
+ * The preview's size and mode, and its two controls. They are bracketed
+ * Buttons, which the terminal draws without their hotkey (`m`, `x`): the
+ * header lists only the tree's keys, the help view the rest.
+ */
 function previewMetaRow(kit: Kit, model: PaneModel): RenderElement {
   const { Box, Text, Button } = kit.ui
   const { preview, markdownMode } = model
-  const isScrollable = preview !== null && lengthOf(preview) > 0
   const isMarkdown = preview?.kind === 'markdown'
 
   return (
@@ -259,41 +416,19 @@ function previewMetaRow(kit: Kit, model: PaneModel): RenderElement {
         {metaTextOf(preview, markdownMode)}
       </Text>
       <Box flexGrow={1} />
-      {isScrollable && (
-        <Button
-          key={KEYS.previewUp}
-          label="↑"
-          hotkey="k"
-          plain
-          dimColor
-          onPress={() => kit.actions.scrollPreview(-1)}
-        />
-      )}
-      {isScrollable && (
-        <Button
-          key={KEYS.previewDown}
-          label="↓"
-          hotkey="j"
-          plain
-          dimColor
-          onPress={() => kit.actions.scrollPreview(1)}
-        />
-      )}
       {isMarkdown && (
         <Button
           key={KEYS.previewMode}
           label={markdownMode === 'rendered' ? 'source' : 'rendered'}
           hotkey="m"
-          plain
           dimColor
           onPress={kit.actions.toggleMarkdownMode}
         />
       )}
       <Button
         key={KEYS.previewClose}
-        label="close"
+        label="✕"
         hotkey="x"
-        plain
         dimColor
         onPress={kit.actions.closePreview}
       />

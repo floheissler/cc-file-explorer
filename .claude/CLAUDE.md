@@ -15,7 +15,8 @@ entry with `"source": "./"`). README.md has the user-facing behavior.
 - `hooks/register.tsx`: the hooks module and the only file that touches `$`.
 - `hooks/host.ts`: the `Host` record the rest of the code takes instead of `$`.
 - `hooks/listing.ts`: reads folders (`$.fs.list` + `git check-ignore`) and files.
-- `hooks/tree.ts`, `layout.ts`, `preview.ts`, `text.ts`, `paths.ts`: pure logic.
+- `hooks/tree.ts`, `levels.ts`, `layout.ts`, `preview.ts`, `text.ts`,
+  `paths.ts`: pure logic. `levels.ts` holds the `e`/`c`/digit steps.
 - `hooks/view.tsx`: draws the pane from a `PaneModel`.
 - `types/index.d.ts`: the `$.state` contract (`PluginState['file-explorer']`).
 - `tests/`: `claude plugin test` suites; `pane.test.ts` mounts the pane on the
@@ -45,6 +46,12 @@ the module otherwise:
   tree's and the preview's own windows under a fixed header.
 - Untrusted text (file names, file contents, error messages) goes through
   `sanitize` before it is drawn.
+- Hotkeys are one lowercase letter or digit: the engine reads Shift+e as `e`,
+  `?` cannot be one, and a mod cannot bind Ctrl or Alt chords of its own.
+  Keys the header does not list (the digits, `j`/`k`) are Buttons in a
+  `display: 'none'` box, whose hotkeys stay armed (checked on 2.1.293; check
+  again after Claude Code updates). Bracketed Buttons (no `plain`) draw
+  without their hotkey letter in the terminal.
 - A tree row is a dim `Text` of branch lines (`branchPrefixOf`, from the
   `guides`/`isLast` that `flattenTree` computes) beside a `Button` keyed
   `row:<path>` for the glyph and name; the `ui.focus` hook relies on the key.

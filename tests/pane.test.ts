@@ -114,10 +114,25 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.press({ key: 'row:src/main.ts' })
     expect(await ui.find({ type: 'Code' })).toBeUndefined()
 
-    // `c` collapses every open folder
-    await ui.press({ key: 'collapse-all' })
+    // `c` closes one level, `e` opens one level again
+    await ui.press({ key: 'collapse-level' })
     expect(await ui.find({ key: 'row:src' })).toBeDefined()
     expect(await ui.find({ key: 'row:src/main.ts' })).toBeUndefined()
+    await ui.press({ key: 'expand-level' })
+    expect(await ui.find({ key: 'row:src/main.ts' })).toBeDefined()
+
+    // The digits, hidden from view, set the depth: 0 closes every folder
+    await ui.press({ key: 'depth-0' })
+    expect(await ui.find({ key: 'row:src/main.ts' })).toBeUndefined()
+    await ui.press({ key: 'depth-1' })
+    expect(await ui.find({ key: 'row:src/main.ts' })).toBeDefined()
+
+    // `h` swaps the tree for the help view and back
+    await ui.press({ key: 'help' })
+    expect(await ui.find({ type: 'Text', text: 'Mouse' })).toBeDefined()
+    expect(await ui.find({ key: 'row:src' })).toBeUndefined()
+    await ui.press({ key: 'help' })
+    expect(await ui.find({ key: 'row:src' })).toBeDefined()
 
     await ui.unmount()
   })

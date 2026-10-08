@@ -27,6 +27,7 @@ export type PaneState = {
   readonly treeTop: StateCell<number>
   readonly previewTop: StateCell<number>
   readonly markdownMode: StateCell<MarkdownMode>
+  readonly helpShown: StateCell<boolean>
 }
 
 /**
@@ -56,5 +57,9 @@ export type Host = {
    */
   readonly invalidate: () => void
   readonly after: (ms: number, fn: () => void) => Timer
+  /**
+   * Says something briefly without a turn: a level step that stopped early.
+   */
+  readonly toast: (text: string) => void
   readonly state: PaneState
 }

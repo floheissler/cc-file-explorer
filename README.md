@@ -35,19 +35,29 @@ Run `/explorer` to open the pane, and again to close it. In fullscreen
 rendering (`/tui fullscreen`) the pane docks beside the transcript from 110
 columns; otherwise it opens above the prompt and Esc closes it.
 
+The header shows the tree's keys, `e: expand  c: collapse  r: refresh  h: help`;
+`h` opens a help view with all of them.
+
 | Do this | To |
 | --- | --- |
 | Click a folder, or focus it and press Enter | Expand or collapse it |
 | Click a file | Preview it under the tree |
-| `c` | Collapse every open folder |
-| Click the previewed file again, or press `x` | Close the preview |
-| Wheel over the tree or the preview | Scroll that part alone; the header stays put |
-| Tab, Up, Down | Walk the tree; the tree scrolls with the focus |
-| `j` / `k`, Page Up / Page Down | Scroll the preview |
-| `m` | Switch a Markdown preview between rendered and source |
+| `e` | Open every folder in view one level deeper; repeat for more |
+| `c` | Close the deepest open folders, one level; repeat for more |
+| `1` – `9` | Open folders exactly that many levels deep |
+| `0` | Close every folder |
 | `r` | Re-read the tree and the previewed file |
+| `h` | Show or hide the help view |
+| Click the previewed file again, `[ ✕ ]`, or `x` | Close the preview |
+| `[ source ]` or `m` | Switch a Markdown preview between rendered and source |
+| Wheel over the tree or the preview | Scroll that part alone; the header stays put |
+| `j` / `k`, Page Up / Page Down | Scroll the preview |
+| Tab, Up, Down | Walk the tree; the tree scrolls with the focus |
 | Ctrl+X then an arrow | Resize the pane |
 | Esc | Return the keyboard to the prompt |
+
+`e` and the digits open at most 200 folders per press and say so when they
+stop early; press again to go further.
 
 Keys work while the pane has the keyboard: click it, or press Ctrl+X then Tab.
 
@@ -95,8 +105,8 @@ cannot send escape sequences to your terminal.
 It calls `$.session.root`, `$.fs.list`, `$.fs.stat`, `$.fs.read`,
 `$.process.run` (`git rev-parse` and `git check-ignore`, read-only, with
 `GIT_OPTIONAL_LOCKS=0`), `$.clock.after`, `$.command.register`, `$.ui.open`,
-`$.ui.close`, `$.ui.panes`, `$.ui.resolve`, `$.ui.invalidate`, `$.ui.log` and
-its own `$.state`. It makes no network calls and writes no files.
+`$.ui.close`, `$.ui.panes`, `$.ui.resolve`, `$.ui.invalidate`, `$.ui.log`,
+`$.ui.toast` and its own `$.state`. It makes no network calls and writes no files.
 `claude plugin validate .` prints the same list from the source.
 
 The person's view (open folders, the previewed file, where each window

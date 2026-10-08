@@ -24,6 +24,10 @@ declare module 'claude-code' {
        */
       previewTop: number
       markdownMode: MarkdownMode
+      /**
+       * Whether the help view stands in for the tree and the preview.
+       */
+      helpShown: boolean
     }
   }
 }

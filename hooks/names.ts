@@ -16,9 +16,19 @@ export const ROW_KEY_PREFIX = 'row:'
  */
 export const KEYS = {
   refresh: 'refresh',
-  collapseAll: 'collapse-all',
+  expandLevel: 'expand-level',
+  collapseLevel: 'collapse-level',
+  help: 'help',
   previewUp: 'preview-up',
   previewDown: 'preview-down',
   previewMode: 'preview-mode',
   previewClose: 'preview-close',
 } as const
+
+/**
+ * The key of the hidden Button whose digit hotkey opens the tree `levels`
+ * deep; `depth-0` closes every folder.
+ */
+export function depthKeyOf(levels: number): string {
+  return `depth-${levels}`
+}
