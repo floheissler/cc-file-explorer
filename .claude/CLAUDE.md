@@ -17,7 +17,9 @@ entry with `"source": "./"`). README.md has the user-facing behavior.
 - `hooks/listing.ts`: reads folders and files through `Host` (`$.fs`).
   Everything but `.git` is listed, git-ignored entries included.
 - `hooks/tree.ts`, `levels.ts`, `layout.ts`, `preview.ts`, `text.ts`,
-  `paths.ts`: pure logic. `levels.ts` holds the `e`/`c`/digit steps.
+  `paths.ts`, `focus.ts`: pure logic. `levels.ts` holds the `e`/`c`/digit
+  steps; `focus.ts` reads the focus order off a drawn tree and keeps the ring
+  off hidden Buttons.
 - `hooks/view.tsx`: draws the pane from a `PaneModel`.
 - `types/index.d.ts`: the `$.state` contract (`PluginState['file-explorer']`).
 - `tests/`: `claude plugin test` suites; `pane.test.ts` mounts the pane on the
@@ -61,6 +63,21 @@ the module otherwise:
 - A tree row is a dim `Text` of branch lines (`branchPrefixOf`, from the
   `guides`/`isLast` that `flattenTree` computes) beside a `Button` keyed
   `row:<path>` for the glyph and name; the `ui.focus` hook relies on the key.
+- Claude Code keeps the focus ring at its place in the focus order across a
+  redraw, not on its key. So when the `ui.focus` hook moves the tree's
+  window, it lands the ring on the entry drawn now where the row will be
+  drawn after the move (`focusLandingOf`, the pattern of `/diff`'s
+  `dialogFocusOf`). Undocumented: check again after Claude Code updates.
+- Hidden Buttons are in the focus order too. The render hook records the
+  drawing's `focusOrderOf`, and the `ui.focus` hook keeps the ring off hidden
+  Buttons (`focusStepOf`): it stays at the tree's last row (returning `{}`),
+  and wraps from the other ends.
+- Content in a clipped region (fixed `height`, `overflow="hidden"`) sits in a
+  `flexShrink={0}` box: otherwise its rows shrink to fit and drop or
+  overprint lines instead of being clipped.
+- A wheel tick's `e.by` already carries the person's scroll speed
+  (`CLAUDE_CODE_SCROLL_SPEED`, `/scroll-speed`): scroll by it as is, as the
+  conversation does.
 - The version lives in `.claude-plugin/plugin.json` alone; the pane shows none.
   Bump it per release, or `claude plugin update` delivers nothing.
 

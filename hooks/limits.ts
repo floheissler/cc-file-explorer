@@ -7,10 +7,6 @@
  */
 const Limits = {
   /**
-   * Rows one wheel tick moves the tree or the preview.
-   */
-  WHEEL_ROWS: 3,
-  /**
    * Lines one press of `j` or `k` moves the preview.
    */
   KEY_ROWS: 3,

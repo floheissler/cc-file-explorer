@@ -238,3 +238,49 @@ export function topRevealing(
 
   return next
 }
+
+/**
+ * Where the focus ring lands as it moves onto a row of the tree, and the
+ * window's top that keeps the row and its neighbors in view.
+ *
+ * Claude Code keeps the ring at its place in the focus order across a
+ * redraw, not on a key. When the window moves, the ring is landed on the
+ * entry drawn now where the row will be drawn after the move, so the redraw
+ * brings the row itself under it.
+ *
+ * @param rows the tree's rows
+ * @param top the window's top now
+ * @param height the rows the tree's region has
+ * @param path the row the ring moves onto
+ * @returns the top and the path of the entry to land on, or null for a path
+ *   that is no entry of the tree
+ */
+export function focusLandingOf(
+  rows: readonly TreeRow[],
+  top: number,
+  height: number,
+  path: string,
+): { readonly top: number; readonly landing: string } | null {
+  const index = rows.findIndex(row => row.type === 'entry' && row.path === path)
+
+  if (index < 0) {
+    return null
+  }
+
+  const before = treeWindowOf(rows.length, top, height)
+  const next = topRevealing(index, top, rows.length, height)
+  const after = treeWindowOf(rows.length, next, height)
+
+  // Notes are Text, never in the focus order: only entries take places
+  const entriesIn = (window: TreeWindow) =>
+    rows
+      .slice(window.start, window.end)
+      .flatMap(row => (row.type === 'entry' ? [row.path] : []))
+
+  const landing =
+    after.start === before.start
+      ? path
+      : (entriesIn(before)[entriesIn(after).indexOf(path)] ?? path)
+
+  return { top: next, landing }
+}

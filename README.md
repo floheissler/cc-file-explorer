@@ -51,9 +51,9 @@ a help view with all of them.
 | `h` | Show or hide the help view |
 | Click the previewed file again, or press `x` | Close the preview |
 | `m` | Switch a Markdown preview between rendered and source |
-| Wheel over the tree or the preview | Scroll that part alone; the header stays put |
+| Wheel over the tree or the preview | Scroll that part alone, as far per notch as the conversation scrolls (`/scroll-speed`); the header stays put |
 | `j` / `k`, Page Up / Page Down | Scroll the preview |
-| Tab, Up, Down | Walk the tree; the tree scrolls with the focus |
+| Tab, Up, Down | Walk the tree; the tree scrolls with the focus, and Down stops at its last row |
 | Ctrl+X then an arrow | Resize the pane |
 | Esc | Return the keyboard to the prompt |
 
@@ -97,8 +97,8 @@ cannot send escape sequences to your terminal.
 | `session.start` | Registers `/tree` |
 | `command.run` of `tree` | Opens the pane, focused, or closes it when it is shown |
 | `ui.render` of the `Pane` | Draws the header, the tree's window and, set off by a blank row and a rule with the file's name, the preview's window, each exactly as tall as its region; reads what the drawing needs but lacks |
-| `ui.scroll` of the pane | Moves the tree's or the preview's own window by the region under the pointer; the engine's window over the pane stays still |
-| `ui.focus` in the pane | Keeps the focused row and its neighbors in view, so the arrows always have a drawn row to move to |
+| `ui.scroll` of the pane | Moves the tree's or the preview's own window by the region under the pointer, as far as the wheel's rows say; the engine's window over the pane stays still |
+| `ui.focus` in the pane | Keeps the focused row and its neighbors in view, so the arrows always have a drawn row to move to, and lands the focus where that row is drawn after the window moves; keeps the focus off the hidden digit keys |
 | `tool.call` of `Write`, `Edit`, `NotebookEdit`, `Bash` | After the call, re-reads an open pane's tree and preview once Claude pauses |
 | `classic.SessionStart` after `/clear`, `/resume`, `/branch` | Forgets what was read, as the session state resets |
 

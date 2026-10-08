@@ -1,6 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
+import { focusOrderOf, focusStepOf, type FocusOrder } from './focus'
 import type { Host } from './host'
 import { paneLayoutOf, regionAt, type PaneLayout } from './layout'
 import Limits from './limits'
@@ -13,6 +14,7 @@ import { messageOf } from './text'
 import {
   clamp,
   flattenTree,
+  focusLandingOf,
   maxTreeTop,
   topRevealing,
   treeWindowOf,
@@ -130,6 +132,14 @@ export const register: Register = on => {
   let refreshTimer: Timer | null = null
   let drawn: Drawn | null = null
   const dirLoads = new Set<string>()
+
+  /**
+   * The focusable elements of the last drawing, and the key the focus ring
+   * last landed on: the focus hook keeps the ring off the hidden ones by
+   * where it comes from.
+   */
+  let focusOrder: FocusOrder = { shown: [], hidden: new Set() }
+  let lastFocused: string | undefined
 
   /**
    * Drops what was read, so the next drawing reads the project afresh.
@@ -426,6 +436,7 @@ export const register: Register = on => {
     }
 
     forget()
+    lastFocused = undefined
     await ensureListing(hostOf($)).catch(() => undefined)
 
     const isInline = e.presentation?.isFullscreen === false
@@ -496,7 +507,7 @@ export const register: Register = on => {
     // have no rows to steer
     drawn = helpShown ? null : { rows, layout }
 
-    return paneView(
+    const tree = paneView(
       { Box, Text, Button, Code, Markdown },
       actionsOf(host),
       Math.max(12, e.props.bodyColumns - Limits.RIGHT_PAD_COLUMNS),
@@ -512,6 +523,10 @@ export const register: Register = on => {
         helpShown,
       },
     )
+
+    focusOrder = focusOrderOf(tree)
+
+    return tree
   })
 
   /**
@@ -538,16 +553,13 @@ export const register: Register = on => {
     const isPage = e.pointer === undefined && Math.abs(e.by) >= e.bodyRows
     const direction = Math.sign(e.by)
 
+    // A wheel tick's `by` already carries the person's scroll speed
+    // (CLAUDE_CODE_SCROLL_SPEED, `/scroll-speed`), so it moves as the
+    // conversation does
     if (region === 'tree') {
-      await scrollTreeBy(
-        host,
-        isPage ? direction * Math.max(1, layout.treeRows - 2) : e.by * Limits.WHEEL_ROWS,
-      )
+      await scrollTreeBy(host, isPage ? direction * Math.max(1, layout.treeRows - 2) : e.by)
     } else if (region === 'preview' || region === 'preview-head') {
-      await scrollPreviewBy(
-        host,
-        isPage ? direction * Math.max(1, layout.previewRows - 1) : e.by * Limits.WHEEL_ROWS,
-      )
+      await scrollPreviewBy(host, isPage ? direction * Math.max(1, layout.previewRows - 1) : e.by)
     }
 
     return {}
@@ -555,24 +567,51 @@ export const register: Register = on => {
 
   /**
    * The focus ring walking the tree: the window follows it, keeping a row
-   * on each side of the focused one in view.
+   * on each side of the focused one in view, and the ring lands where the
+   * row is drawn after the move. The ring stays off the hidden digit
+   * Buttons: it stops at the tree's last row and wraps from the other ends.
    */
   on('ui.focus', { requestId: 'file-explorer' }, async ($, e, next) => {
-    const element = e.element ?? ''
+    const step = focusStepOf(e.element, lastFocused, focusOrder)
 
-    if (drawn !== null && element.startsWith(ROW_KEY_PREFIX)) {
-      const { rows, layout } = drawn
-      const path = element.slice(ROW_KEY_PREFIX.length)
-      const index = rows.findIndex(row => row.type === 'entry' && row.path === path)
-
-      if (index >= 0) {
-        await update($, TREE_TOP, top =>
-          topRevealing(index, top, rows.length, layout.treeRows),
-        )
-      }
+    if (step === 'stay') {
+      return {}
     }
 
-    return next(e)
+    // Passes the move on, remembering the element the ring ends up on
+    const land = async (element: string | undefined, moved: typeof e) => {
+      const result = await next(moved)
+
+      if (result.deny === undefined) {
+        lastFocused = element
+      }
+
+      return result
+    }
+
+    if (step !== 'pass') {
+      return land(step.element, { ...e, element: step.element })
+    }
+
+    const element = e.element ?? ''
+
+    if (drawn === null || !element.startsWith(ROW_KEY_PREFIX)) {
+      return land(e.element, e)
+    }
+
+    const { rows, layout } = drawn
+    const top = await read($, TREE_TOP)
+    const found = focusLandingOf(rows, top, layout.treeRows, element.slice(ROW_KEY_PREFIX.length))
+
+    if (found === null) {
+      return land(e.element, e)
+    }
+
+    if (found.top !== top) {
+      await update($, TREE_TOP, () => found.top)
+    }
+
+    return land(e.element, { ...e, element: `${ROW_KEY_PREFIX}${found.landing}` })
   }).catch(($, e, next) => next(e))
 
   /**

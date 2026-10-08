@@ -196,22 +196,26 @@ function helpRegion(kit: Kit, rows: number): RenderElement {
   const { Box, Text } = kit.ui
   const room = Math.max(1, kit.columns - HELP_KEY_COLUMNS)
 
+  // The inner box keeps its natural height inside the clipped region: rows
+  // shrunk to fit would drop or overprint lines instead of clipping them
   return (
     <Box flexDirection="column" height={Math.max(1, rows)} overflow="hidden">
-      {HELP.flatMap((section, at) => [
-        ...(at > 0 ? [<Box height={1} />] : []),
-        <Text bold wrap="truncate-end">
-          {section.title}
-        </Text>,
-        ...section.rows.map(([keys, does]) => (
-          <Box flexDirection="row" height={1}>
-            <Text color="suggestion">{padEnd(keys, HELP_KEY_COLUMNS)}</Text>
-            <Text dimColor wrap="truncate-end">
-              {truncateEnd(does, room)}
-            </Text>
-          </Box>
-        )),
-      ])}
+      <Box flexDirection="column" flexShrink={0}>
+        {HELP.flatMap((section, at) => [
+          ...(at > 0 ? [<Box height={1} />] : []),
+          <Text bold wrap="truncate-end">
+            {section.title}
+          </Text>,
+          ...section.rows.map(([keys, does]) => (
+            <Box flexDirection="row" height={1}>
+              <Text color="suggestion">{padEnd(keys, HELP_KEY_COLUMNS)}</Text>
+              <Text dimColor wrap="truncate-end">
+                {truncateEnd(does, room)}
+              </Text>
+            </Box>
+          )),
+        ])}
+      </Box>
     </Box>
   )
 }
@@ -437,9 +441,13 @@ function previewMetaRow(kit: Kit, model: PaneModel): RenderElement {
 function previewRegion(kit: Kit, model: PaneModel): RenderElement {
   const { Box } = kit.ui
 
+  // As in the help view: the content keeps its natural height and the
+  // region clips it, or Markdown's rows shrink and drop or overprint lines
   return (
     <Box flexDirection="column" height={model.layout.previewRows} overflow="hidden">
-      {previewBody(kit, model)}
+      <Box flexDirection="column" flexShrink={0}>
+        {previewBody(kit, model)}
+      </Box>
     </Box>
   )
 }

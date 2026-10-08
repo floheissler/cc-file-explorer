@@ -5,6 +5,7 @@ import {
   branchPrefixOf,
   compareEntries,
   flattenTree,
+  focusLandingOf,
   maxTreeTop,
   topRevealing,
   treeWindowOf,
@@ -138,6 +139,43 @@ describe('topRevealing', () => {
 
   test('leaves a window that already shows the row and its neighbors', async () => {
     expect(topRevealing(44, 40, 100, 10)).toBe(40)
+  })
+})
+
+describe('focusLandingOf', () => {
+  // f00 … f19 in the root; a region of 7 rows first shows f00 … f05 and a
+  // count of the rows below
+  const files = Array.from({ length: 20 }, (_, at) => file(`f${String(at).padStart(2, '0')}`))
+  const rows = flattenTree(dir => (dir === '' ? { entries: files, truncated: 0 } : undefined), new Set())
+
+  test('lands on the row itself while the window stays', async () => {
+    expect(focusLandingOf(rows, 0, 7, 'f02')).toEqual({ top: 0, landing: 'f02' })
+  })
+
+  test('moving down past the edge, lands where the row is drawn after the move', async () => {
+    // The window moves two rows down: f05 then sits where f03 sits now
+    expect(focusLandingOf(rows, 0, 7, 'f05')).toEqual({ top: 2, landing: 'f03' })
+  })
+
+  test('moving up past the edge, lands where the row is drawn after the move', async () => {
+    // From top 2 (f02 … f06), the window moves a row up: f02 then sits
+    // where f03 sits now
+    expect(focusLandingOf(rows, 2, 7, 'f02')).toEqual({ top: 1, landing: 'f03' })
+  })
+
+  test('counts only entries, since notes are not in the focus order', async () => {
+    // An open folder still loading draws a note row under it
+    const withNote = flattenTree(
+      folder => (folder === '' ? { entries: [dir('a'), ...files.slice(0, 19)], truncated: 0 } : undefined),
+      new Set(['a']),
+    )
+
+    expect(withNote[1]).toMatchObject({ type: 'note' })
+    expect(focusLandingOf(withNote, 0, 7, 'f03')).toEqual({ top: 2, landing: 'f02' })
+  })
+
+  test('knows no row for a path not in the tree', async () => {
+    expect(focusLandingOf(rows, 0, 7, 'nowhere')).toBeNull()
   })
 })
 
