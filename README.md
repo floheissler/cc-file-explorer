@@ -31,8 +31,6 @@ It is a [mod](https://code.claude.com/docs/en/plugins/mods/overview): a plugin
 of function hooks that draws in Claude Code's own interface, in the terminal
 and in the Desktop app's Code tab.
 
-> **Status:** early (v0.1.0). Expect rough edges.
-
 ## Requirements
 
 - **Claude Code v2.1.287 or later** in a terminal, or the Desktop app's Code
