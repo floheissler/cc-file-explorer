@@ -1,11 +1,13 @@
+import type { MarkdownMode } from '../types'
 import type { Host } from './host'
 import Limits from './limits'
-import { EXPANDED_KEY_PREFIX } from './names'
-import { depthOf, rootIdOf } from './paths'
+import { SAVED_KEY_PREFIX } from './names'
+import { depthOf, keyOf, nativePathOf, rootIdOf } from './paths'
 
 /**
- * Each project's open folders, kept in the store between sessions, so a
- * session's tree opens where the project's last one left it.
+ * Each project's view of the pane, kept in the store between sessions, so a
+ * session's pane opens where the project's last one left it: the open
+ * folders, and the file the preview showed, its pin and its Markdown mode.
  *
  * Every session on the machine shares the store, and a `get` then a `set`
  * there is not atomic. So each project has a key of its own: sessions in
@@ -14,17 +16,27 @@ import { depthOf, rootIdOf } from './paths'
  */
 
 /**
- * What the store keeps under a project's key: its open folders as tree keys,
- * and when they were saved, by which the project saved longest ago is the
- * first dropped.
+ * The view a project keeps: its open folders as tree keys; the file the
+ * preview shows, null while it is closed; whether the preview is pinned to
+ * that file; how the preview shows Markdown.
  */
-export type SavedFolders = {
+export type SavedView = {
   readonly expanded: readonly string[]
+  readonly selected: string | null
+  readonly pinned: boolean
+  readonly markdownMode: MarkdownMode
+}
+
+/**
+ * What the store keeps under a project's key: its view, and when it was
+ * saved, by which the project saved longest ago is the first dropped.
+ */
+export type SavedRecord = SavedView & {
   readonly savedAt: number
 }
 
 /**
- * A project's saved folders by store key, as the drop reads them.
+ * A project's saved view by store key, as the drop reads them.
  */
 export type SavedStamp = {
   readonly key: string
@@ -32,26 +44,35 @@ export type SavedStamp = {
 }
 
 /**
- * The store key of a project's open folders, one for every spelling of its
- * root.
+ * The store key of a project's view, one for every spelling of its root.
  *
  * @param root the session's project root, native
  * @returns the key
  */
 export function savedKeyOf(root: string): string {
-  return `${EXPANDED_KEY_PREFIX}${rootIdOf(root)}`
+  return `${SAVED_KEY_PREFIX}${rootIdOf(root)}`
 }
 
 /**
- * Whether a stored value can be a folder's key: `/`-separated names, none
+ * Whether a stored value can be an entry's key: `/`-separated names, none
  * empty, `.` or `..`. Anything else names no row of the tree.
  */
-function isFolderKey(value: unknown): value is string {
+function isEntryKey(value: unknown): value is string {
   return (
     typeof value === 'string' &&
     value !== '' &&
     value.split('/').every(part => part !== '' && part !== '.' && part !== '..')
   )
+}
+
+/**
+ * Whether a stored value can be the key of a file under the root: an
+ * entry's key that names the same entry once joined to the root, so none
+ * that leads out of it, as `..\` under Windows would. The preview reads
+ * the file the key names; a folder's key only opens a row the tree lists.
+ */
+function isKeyUnder(root: string, value: unknown): value is string {
+  return isEntryKey(value) && keyOf(root, nativePathOf(root, value)) === value
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -92,31 +113,77 @@ export function cappedFolders(expanded: readonly string[], maxChars: number): st
 }
 
 /**
- * The record the store keeps for a project's open folders.
+ * The previewed file and the open folders within `MAX_SAVED_CHARS` of JSON:
+ * the file first, as one key that shows whole, then the shallowest folders.
  *
- * @param expanded the open folders
- * @param savedAt when, in milliseconds since the epoch
- * @returns the record, its folders within `MAX_SAVED_CHARS`
+ * @param expanded the open folders, each an entry's key
+ * @param selected the previewed file, an entry's key, or null
+ * @returns what is kept of both
  */
-export function savedRecordOf(expanded: readonly string[], savedAt: number): SavedFolders {
-  return { expanded: cappedFolders(expanded.filter(isFolderKey), Limits.MAX_SAVED_CHARS), savedAt }
+function budgetedOf(
+  expanded: readonly string[],
+  selected: string | null,
+): Pick<SavedView, 'expanded' | 'selected'> {
+  const fileChars = selected === null ? 0 : JSON.stringify(selected).length
+  const kept = fileChars <= Limits.MAX_SAVED_CHARS ? selected : null
+
+  return {
+    expanded: cappedFolders(expanded, Limits.MAX_SAVED_CHARS - (kept === null ? 0 : fileChars)),
+    selected: kept,
+  }
 }
 
 /**
- * The open folders a stored value holds. An older version of the mod, a
- * person or another tool may have written the store's file: a value not
- * shaped as a record holds none, and entries that cannot be folder keys
- * are left out.
+ * The record the store keeps for a project's view. A pin outlives no
+ * preview, as closing the preview lets go of it.
+ *
+ * @param view the pane's view
+ * @param savedAt when, in milliseconds since the epoch
+ * @returns the record, its folders and file within `MAX_SAVED_CHARS`
+ */
+export function savedRecordOf(view: SavedView, savedAt: number): SavedRecord {
+  const { expanded, selected } = budgetedOf(
+    view.expanded.filter(isEntryKey),
+    isEntryKey(view.selected) ? view.selected : null,
+  )
+
+  return {
+    expanded,
+    selected,
+    pinned: selected !== null && view.pinned,
+    markdownMode: view.markdownMode,
+    savedAt,
+  }
+}
+
+/**
+ * The view a stored value holds. An older version of the mod, a person or
+ * another tool may have written the store's file: a value not shaped as a
+ * record holds none, entries that cannot be folder keys are left out, a
+ * file that cannot be one under the root is not previewed, and what an
+ * older record does not say stands at its default (no preview, unpinned,
+ * Markdown rendered).
  *
  * @param value what the store holds under a project's key
- * @returns the folders, or null when the value holds none
+ * @param root the session's project root, native
+ * @returns the view, or null when the value holds none
  */
-export function savedFoldersIn(value: unknown): string[] | null {
+export function savedViewIn(value: unknown, root: string): SavedView | null {
   if (!isObject(value) || !Array.isArray(value.expanded)) {
     return null
   }
 
-  return cappedFolders(value.expanded.filter(isFolderKey), Limits.MAX_SAVED_CHARS)
+  const { expanded, selected } = budgetedOf(
+    value.expanded.filter(isEntryKey),
+    isKeyUnder(root, value.selected) ? value.selected : null,
+  )
+
+  return {
+    expanded,
+    selected,
+    pinned: selected !== null && value.pinned === true,
+    markdownMode: value.markdownMode === 'source' ? 'source' : 'rendered',
+  }
 }
 
 /**
@@ -153,38 +220,55 @@ export function droppedKeysOf(saved: readonly SavedStamp[], max: number): string
 }
 
 /**
- * The open folders saved for the session's project.
+ * The view saved for the session's project. A file no longer there, or no
+ * longer a file, is not previewed: its pin goes with it.
  *
  * @param host the engine's calls
- * @returns the folders, or null when none are saved
+ * @returns the view, or null when none is saved
  */
-export async function loadFolders(host: Host): Promise<string[] | null> {
-  return savedFoldersIn(await host.store.get(savedKeyOf(await host.root())))
+export async function loadView(host: Host): Promise<SavedView | null> {
+  const root = await host.root()
+  const view = savedViewIn(await host.store.get(savedKeyOf(root)), root)
+
+  if (view === null || view.selected === null) {
+    return view
+  }
+
+  const isFile = await host.stat(nativePathOf(root, view.selected)).then(
+    stat => stat.kind === 'file',
+    () => false,
+  )
+
+  return isFile ? view : { ...view, selected: null, pinned: false }
 }
 
 /**
- * Saves the open folders for the session's project, then drops the projects
- * saved longest ago past `MAX_SAVED_PROJECTS`.
+ * Saves the pane's view, as the session state holds it now, for the
+ * session's project, then drops the projects saved longest ago past
+ * `MAX_SAVED_PROJECTS`.
  *
  * Each project's own key keeps sessions in other projects from writing over
  * it. A drop can still race a session saving the dropped project at that
- * moment: that project's folders are lost, nothing else.
+ * moment: that project's view is lost, nothing else.
  *
  * @param host the engine's calls
- * @param expanded the open folders
  * @param savedAt when, in milliseconds since the epoch
  */
-export async function saveFolders(
-  host: Host,
-  expanded: readonly string[],
-  savedAt: number,
-): Promise<void> {
-  const key = savedKeyOf(await host.root())
+export async function saveView(host: Host, savedAt: number): Promise<void> {
+  const [root, expanded, selected, pinned, markdownMode] = await Promise.all([
+    host.root(),
+    host.state.expanded.get(),
+    host.state.selected.get(),
+    host.state.pinned.get(),
+    host.state.markdownMode.get(),
+  ])
 
-  await host.store.set(key, savedRecordOf(expanded, savedAt))
+  const key = savedKeyOf(root)
+
+  await host.store.set(key, savedRecordOf({ expanded, selected, pinned, markdownMode }, savedAt))
 
   const others = (await host.store.keys()).filter(
-    other => other.startsWith(EXPANDED_KEY_PREFIX) && other !== key,
+    other => other.startsWith(SAVED_KEY_PREFIX) && other !== key,
   )
 
   if (others.length < Limits.MAX_SAVED_PROJECTS) {
