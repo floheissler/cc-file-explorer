@@ -1,7 +1,7 @@
 import type { RenderElement } from 'claude-code'
 import { describe, expect, test } from 'claude-code/testing'
 
-import { focusOrderOf, focusStepOf, type FocusOrder } from '../hooks/focus'
+import { focusOrderOf, focusStepOf, ringElementOf, ringPlaceOf, type FocusOrder } from '../hooks/focus'
 
 /**
  * A drawn element as plain data, as the render hook returns it.
@@ -57,5 +57,24 @@ describe('focusStepOf', () => {
 
   test('stays when nothing is shown', async () => {
     expect(focusStepOf('depth-0', 'help', { shown: [], hidden: order.hidden })).toBe('stay')
+  })
+})
+
+describe('ringPlaceOf and ringElementOf', () => {
+  const before: FocusOrder = { shown: ['expand-level', 'help', 'row:a', 'row:b'], hidden: new Set(['depth-0']) }
+
+  test('the ring keeps its place across a redraw, on whatever is drawn there', async () => {
+    const place = ringPlaceOf(before, 'row:b')
+    const after: FocusOrder = { shown: ['expand-level', 'help', 'row:a', 'row:a/x', 'row:b'], hidden: before.hidden }
+
+    expect(place).toBe(3)
+    expect(ringElementOf(after, place)).toBe('row:a/x')
+  })
+
+  test('rests on none of the pane’s own off its shown elements', async () => {
+    expect(ringPlaceOf(before, undefined)).toBeNull()
+    expect(ringPlaceOf(before, 'depth-0')).toBeNull()
+    expect(ringElementOf(before, null)).toBeUndefined()
+    expect(ringElementOf({ shown: ['help'], hidden: new Set() }, 3)).toBeUndefined()
   })
 })

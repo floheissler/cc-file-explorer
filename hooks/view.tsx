@@ -72,6 +72,11 @@ export type PaneActions = {
    * typed, the filter closes.
    */
   submitFilter: (text: string) => Promise<void>
+  /**
+   * Puts an `@` mention of the focused row, else the previewed file, at the
+   * prompt's cursor.
+   */
+  mention: () => Promise<void>
 }
 
 /**
@@ -123,6 +128,11 @@ export type PaneModel = {
    * The filter's row over the tree, null while the filter is not shown.
    */
   readonly filter: FilterModel | null
+  /**
+   * The row `a` mentioned, which takes the focus ring back as the pane takes
+   * the keyboard again, until the ring lands anywhere; null for none.
+   */
+  readonly mentioned: string | null
 }
 
 /**
@@ -397,6 +407,7 @@ function helpSectionsOf(seat: Seat): readonly HelpSection[] {
       ['0', 'close every folder'],
       ['r', 're-read the tree and the preview'],
       ['f', 'filter the tree by name as you type; again to clear'],
+      ['a', 'mention the focused row to Claude at the prompt (@path), else the previewed file'],
       ['j  k', 'scroll the preview down, up'],
       ['m', 'Markdown preview: rendered or source'],
       ['x', isInline ? 'close the file, back to the tree' : 'close the preview'],
@@ -559,8 +570,17 @@ function helpRegion(kit: Kit, rows: number, seat: Seat): RenderElement {
 }
 
 /**
+ * The control that mentions the focused row, else the previewed file, at the
+ * prompt: in the header, and in an inline file view's row, which stands in
+ * for the header.
+ */
+function mentionControlOf(kit: Kit): ActionControl {
+  return { key: KEYS.mention, hotkey: 'a', label: 'mention', onPress: kit.actions.mention }
+}
+
+/**
  * The header: the project's name, then the tree's controls, as many labelled
- * as the width leaves the name its floor (`e c r f h` in the order the help
+ * as the width leaves the name its floor (`e c r f a h` in the order the help
  * lists them).
  */
 function headerRow(kit: Kit, model: PaneModel): Fitted {
@@ -576,6 +596,7 @@ function headerRow(kit: Kit, model: PaneModel): Fitted {
       label: model.filter === null ? 'filter' : 'clear',
       onPress: kit.actions.toggleFilter,
     },
+    mentionControlOf(kit),
     { key: KEYS.help, hotkey: 'h', label: model.helpShown ? 'back' : 'help', onPress: kit.actions.toggleHelp },
   ]
 
@@ -646,9 +667,11 @@ function treeRegion(kit: Kit, model: PaneModel): RenderElement {
   const { Box, Text } = kit.ui
   const { window, rows, layout } = model
 
-  // The row the ring starts on: the revealed one, else in an inline pane's
-  // tree the picked file's, so stepping back from the file lands on it
-  const landing = model.revealed ?? (model.inlineView === 'tree' ? model.selected : null)
+  // The row the ring starts on: the one `a` mentioned, which the ring
+  // left for the prompt; the revealed one; else in an inline pane's tree
+  // the picked file's, so stepping back from the file lands on it
+  const landing =
+    model.mentioned ?? model.revealed ?? (model.inlineView === 'tree' ? model.selected : null)
 
   return (
     <Box flexDirection="column" height={layout.treeRows} overflow="hidden">
@@ -814,11 +837,11 @@ function previewTitleRow(kit: Kit, selected: string): RenderElement {
 /**
  * An inline pane's file view starts with one row: the file's name set in a
  * rule, then its controls, as many labelled as the width leaves the name its
- * floor; `x` steps back to the tree.
+ * floor; `a` mentions the file, `x` steps back to the tree.
  */
 function inlineFileHeadRow(kit: Kit, model: PaneModel, selected: string): Fitted {
   const { Box, Text } = kit.ui
-  const controls = previewControlsOf(kit, model, 'back')
+  const controls = previewControlsOf(kit, model, { closeLabel: 'back', hasMention: true })
 
   // The two rules take two cells each, set off from the name by the gap
   const { legend, room } = fitRow(kit.columns, legendsOf(controls), Limits.NAME_FLOOR_CELLS, {
@@ -870,9 +893,14 @@ function metaTextsOf(preview: Preview | null, markdownMode: MarkdownMode): strin
 
 /**
  * The previewed file's controls: scroll it (when it has lines), switch a
- * Markdown file's form, and close it, `x` labelled for where it leads.
+ * Markdown file's form, mention it where no header carries `a`, and close
+ * it, `x` labelled for where it leads.
  */
-function previewControlsOf(kit: Kit, model: PaneModel, closeLabel: string): readonly ActionControl[] {
+function previewControlsOf(
+  kit: Kit,
+  model: PaneModel,
+  { closeLabel, hasMention }: { readonly closeLabel: string; readonly hasMention: boolean },
+): readonly ActionControl[] {
   const { preview, markdownMode } = model
   const isScrollable = preview !== null && lengthOf(preview) > 0
   const isMarkdown = preview?.kind === 'markdown'
@@ -894,6 +922,7 @@ function previewControlsOf(kit: Kit, model: PaneModel, closeLabel: string): read
           },
         ]
       : []),
+    ...(hasMention ? [mentionControlOf(kit)] : []),
     { key: KEYS.previewClose, hotkey: 'x', label: closeLabel, onPress: kit.actions.closePreview },
   ]
 }
@@ -904,7 +933,7 @@ function previewControlsOf(kit: Kit, model: PaneModel, closeLabel: string): read
  */
 function previewMetaRow(kit: Kit, model: PaneModel): Fitted {
   const { Box, Text } = kit.ui
-  const controls = previewControlsOf(kit, model, 'close')
+  const controls = previewControlsOf(kit, model, { closeLabel: 'close', hasMention: false })
   const facts = metaTextsOf(model.preview, model.markdownMode)
   const { legend, room } = fitRow(kit.columns, legendsOf(controls), cellWidth(facts.at(-1) ?? ''))
 

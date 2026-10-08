@@ -258,28 +258,35 @@ describe('a narrow header', () => {
     stubProject(on)
     await openTree($, true)
 
+    const props = {
+      title: 'Explorer',
+      isFocused: true,
+      bodyColumns: 28,
+      placement: 'dock',
+      scroll: { offset: 0, bodyRows: 30 },
+      view: {},
+    } as const
+
     const ui = await $.ui.mount({
       plugin: 'file-explorer',
       component: 'Pane',
       requestId: 'file-explorer',
       surface: 'terminal',
       viewport: { columns: 160, rows: 40, isFullscreen: true },
-      props: {
-        title: 'Explorer',
-        isFocused: true,
-        bodyColumns: 26,
-        placement: 'dock',
-        scroll: { offset: 0, bodyRows: 30 },
-        view: {},
-      },
+      props,
     })
 
-    // At 26 columns the header draws `e c r f  h: help`: e is a hidden Button
-    expect(await ui.find({ type: 'Text', text: 'e c r f' })).toBeDefined()
+    // At 28 columns the header draws `e c r f a  h: help`: e is a hidden Button
+    expect(await ui.find({ type: 'Text', text: 'e c r f a' })).toBeDefined()
     expect(await ui.find({ key: 'help' })).toMatchObject({ props: { label: 'help' } })
 
     await ui.press({ key: 'expand-level' })
     expect(await ui.find({ key: `row:${DEEP[0]}/${DEEP[1]}` })).toBeDefined()
+
+    // At 26, `h: help` alone: the name keeps its 8 cells
+    await ui.redraw({ ...props, bodyColumns: 26 })
+    expect(await ui.find({ type: 'Text', text: 'e c r' })).toBeUndefined()
+    expect(await ui.find({ key: 'help' })).toMatchObject({ props: { label: 'help' } })
 
     await ui.unmount()
   })

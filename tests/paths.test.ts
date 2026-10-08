@@ -9,6 +9,7 @@ import {
   keyOf,
   nameOf,
   nativePathOf,
+  relativePathOf,
   rootLabelOf,
   rootOf,
   styleOf,
@@ -114,6 +115,7 @@ describe('keyOf', () => {
   test('POSIX compares case, and spellings rather than where links lead', async () => {
     expect(keyOf('/home/me/proj', '/home/me/proj/src/a.ts')).toBe('src/a.ts')
     expect(keyOf('/home/me/proj', '/home/me/proj/')).toBe('')
+    expect(keyOf('/home/me/proj/', '/home/me/proj')).toBe('')
     expect(keyOf('/home/me/proj', '/home/me/Proj/src/a.ts')).toBe(null)
     expect(keyOf('/home/me/proj', '/home/me/proj2/x')).toBe(null)
     expect(keyOf('/private/tmp/p', '/tmp/p/x')).toBe(null)
@@ -166,5 +168,21 @@ describe('foldKey', () => {
     expect(foldKey('Src/Main.ts', 'win32')).toBe('src/main.ts')
     expect(foldKey('Src/Main.ts', 'posix')).toBe('Src/Main.ts')
     expect(foldKey('café.md', 'posix')).toBe('café.md')
+  })
+})
+
+describe('relativePathOf', () => {
+  test('climbs with .. to the folder both share', async () => {
+    expect(relativePathOf('', 'src/main.ts', 'posix')).toBe('src/main.ts')
+    expect(relativePathOf('src', 'src/main.ts', 'posix')).toBe('main.ts')
+    expect(relativePathOf('src', 'README.md', 'posix')).toBe('../README.md')
+    expect(relativePathOf('a/b', 'a/c/d', 'posix')).toBe('../c/d')
+    expect(relativePathOf('src', 'src', 'posix')).toBe('.')
+    expect(relativePathOf('src/deep', 'src', 'posix')).toBe('..')
+  })
+
+  test('shares a folder spelled in another case on Windows only', async () => {
+    expect(relativePathOf('Src', 'src/main.ts', 'win32')).toBe('main.ts')
+    expect(relativePathOf('Src', 'src/main.ts', 'posix')).toBe('../src/main.ts')
   })
 })

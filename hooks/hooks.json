@@ -1,4 +1,4 @@
 {
-  "description": "The explorer pane: /tree and its Pane drawing, its own scrolling of the tree and the preview, and a re-read of the tree after Claude's edits and shell commands",
+  "description": "The explorer pane: /tree and its Pane drawing, its own scrolling of the tree and the preview, @ mentions of its entries at the prompt, and a re-read of the tree after Claude's edits and shell commands",
   "modules": ["./register.tsx"]
 }

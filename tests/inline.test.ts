@@ -142,6 +142,38 @@ describe('an inline pane', () => {
     await ui.unmount()
   })
 
+  test('mentions the file it shows, its row carrying a', async ($, on) => {
+    projectOf(on, ['README.md', 'a.txt'])
+    const fills: string[] = []
+
+    on('session.cwd', () => ({ value: ROOT }))
+    on('ui.focus', () => ({}))
+    on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))
+    on('prompt.fill', ($, e) => {
+      fills.push(e.text)
+
+      return { isFilled: true }
+    })
+    await treeIn($, CLASSIC)
+
+    const ui = await $.ui.mount(INLINE)
+
+    // The ring rested on another row before the file took the tree's place
+    await $.ui.focus({
+      component: 'Pane',
+      requestId: 'file-explorer',
+      plugin: 'file-explorer',
+      element: 'row:README.md',
+      origin: { kind: 'person' },
+    })
+    await ui.press({ key: 'row:a.txt' })
+    expect(await ui.find({ key: 'mention' })).toMatchObject({ props: { label: 'mention', hotkey: 'a' } })
+
+    await ui.press({ key: 'mention' })
+    expect(fills).toEqual(['@a.txt '])
+    await ui.unmount()
+  })
+
   test('draws the tree and the file together once it moves to the dock', async ($, on) => {
     projectOf(on, ['README.md', 'a.txt'])
     await treeIn($, NARROW)

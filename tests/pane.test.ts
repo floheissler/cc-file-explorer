@@ -1,4 +1,4 @@
-import type { FsEntry, On } from 'claude-code'
+import type { FsEntry, On, PromptBox, PromptFillInput } from 'claude-code'
 import { expect, mock, test, type Engine } from 'claude-code/testing'
 
 import { pathTo, type ElementData } from './drawn'
@@ -130,6 +130,192 @@ function recordFocus(on: On): (string | undefined)[] {
 
   return focused
 }
+
+/**
+ * The prompt box, standing in for Claude Code beneath the plugin: it holds
+ * `box` and takes every fill, or refuses each; and the toasts the plugin
+ * raised. A test's hook answers as a hook does, so its refusal carries no
+ * cause (`dialog`, `no_composer`): those only the engine gives.
+ */
+function stubPrompt(on: On, box: PromptBox, isRefusing = false) {
+  const fills: PromptFillInput[] = []
+  const toasts: string[] = []
+
+  on('prompt.read', () => ({ value: box }))
+  on('prompt.fill', ($, e) => {
+    fills.push(e)
+
+    return { isFilled: !isRefusing }
+  })
+  on('ui.toast', ($, e) => {
+    toasts.push(e.text)
+
+    return { value: undefined }
+  })
+
+  return { fills, toasts }
+}
+
+/**
+ * The text of each fill, as it went in at the cursor.
+ */
+const insertsOf = (fills: readonly PromptFillInput[]) =>
+  fills.map(fill => {
+    expect(fill.mode).toBe('insert')
+
+    return fill.text
+  })
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`a mentions the focused row at the prompt's cursor, else the previewed file (${surface})`, async ($, on) => {
+    stubProject(on, FOLDERS, FILES)
+    on('session.cwd', () => ({ value: ROOT }))
+    recordFocus(on)
+    const prompt = stubPrompt(on, { text: 'look at', cursor: 7 })
+    await openTree($)
+
+    const ui = await $.ui.mount({ ...PANE, surface })
+
+    // A folder ends in its separator, set off from the word before it
+    await $.ui.focus(ringOnto('row:src'))
+    await ui.press({ key: 'mention' })
+
+    // With the ring off the rows, the previewed file
+    await ui.press({ key: 'row:README.md' })
+    await $.ui.focus(ringOnto('preview-close'))
+    await ui.press({ key: 'mention' })
+
+    expect(insertsOf(prompt.fills)).toEqual([' @src/ ', ' @README.md '])
+    expect(prompt.toasts).toEqual([])
+
+    await ui.unmount()
+  })
+}
+
+test('a mentions the row the ring rests on after rows open above it', async ($, on) => {
+  stubProject(on, FOLDERS, FILES)
+  on('session.cwd', () => ({ value: ROOT }))
+  recordFocus(on)
+  const prompt = stubPrompt(on, { text: '', cursor: 0 })
+  await openTree($)
+
+  const ui = await $.ui.mount(paneOf(30))
+
+  // node_modules, src, README.md; `e` opens src above README.md, and Claude
+  // Code keeps the ring at its place in the focus order, now src/main.ts
+  await $.ui.focus(ringOnto('row:README.md'))
+  await ui.press({ key: 'expand-level' })
+  expect(await ui.find({ key: 'row:src/main.ts' })).toBeDefined()
+  await ui.press({ key: 'mention' })
+
+  expect(insertsOf(prompt.fills)).toEqual(['@src/main.ts '])
+
+  await ui.unmount()
+})
+
+test('a hands the keyboard to the prompt, and the ring comes back to its row', async ($, on) => {
+  stubProject(on, FOLDERS, FILES)
+  on('session.cwd', () => ({ value: ROOT }))
+  recordFocus(on)
+  const prompt = stubPrompt(on, { text: '', cursor: 0 })
+  await openTree($)
+
+  const pane = paneOf(30)
+  const ui = await $.ui.mount(pane)
+
+  // The mentioned row takes the ring as the pane takes the keyboard back
+  await $.ui.focus(ringOnto('row:README.md'))
+  await ui.press({ key: 'mention' })
+  expect(await ui.find({ key: 'row:README.md' })).toMatchObject({ props: { autoFocus: true } })
+
+  // Without the keyboard the pane shows no ring: nothing to mention
+  await ui.redraw({ ...pane.props, isFocused: false })
+  await ui.press({ key: 'mention' })
+  expect(prompt.toasts).toEqual(['Focus a row or preview a file to mention it'])
+
+  // Once the ring lands elsewhere, the row lets go of it
+  await ui.redraw(pane.props)
+  await $.ui.focus(ringOnto('row:src'))
+  expect(await ui.find({ key: 'row:README.md' })).not.toMatchObject({ props: { autoFocus: true } })
+  expect(insertsOf(prompt.fills)).toEqual(['@README.md '])
+
+  await ui.unmount()
+})
+
+test('a mentions the entry /tree <path> revealed, the ring on it', async ($, on) => {
+  stubProject(on, FOLDERS, FILES)
+  on('session.cwd', () => ({ value: ROOT }))
+  recordFocus(on)
+  const prompt = stubPrompt(on, { text: '', cursor: 0 })
+
+  await $.command.run({
+    command: 'tree',
+    args: 'src',
+    origin: { kind: 'composer' },
+    presentation: { isFullscreen: true, columns: 160 },
+  })
+
+  const ui = await $.ui.mount(paneOf(30))
+  expect(await ui.find({ key: 'row:src' })).toMatchObject({ props: { autoFocus: true } })
+
+  // The revealed row takes the ring as the pane takes the keyboard, which
+  // Claude Code raises as the plugin's own focus move
+  await $.ui.focus({ ...ringOnto('row:src'), origin: { kind: 'plugin', name: 'file-explorer' } })
+  await ui.press({ key: 'mention' })
+
+  expect(insertsOf(prompt.fills)).toEqual(['@src/ '])
+
+  await ui.unmount()
+})
+
+test('a spells the path from the folder a shell cd moved the session to', async ($, on) => {
+  stubProject(on, FOLDERS, FILES)
+  on('session.cwd', () => ({ value: `${ROOT}/src` }))
+  recordFocus(on)
+  const prompt = stubPrompt(on, { text: '', cursor: 0 })
+  await openTree($)
+
+  const ui = await $.ui.mount(paneOf(30))
+
+  await $.ui.focus(ringOnto('row:README.md'))
+  await ui.press({ key: 'mention' })
+  await $.ui.focus(ringOnto('row:src'))
+  await ui.press({ key: 'mention' })
+
+  expect(insertsOf(prompt.fills)).toEqual(['@../README.md ', '@"./" '])
+
+  await ui.unmount()
+})
+
+test('a says why when it mentions nothing', async ($, on) => {
+  stubProject(on, { [ROOT]: [entry('a.txt', 'file', 2), entry('issue#1.md', 'file', 2)] }, {})
+  on('session.cwd', () => ({ value: ROOT }))
+  recordFocus(on)
+  const prompt = stubPrompt(on, { text: '', cursor: 0 }, true)
+  await openTree($)
+
+  const ui = await $.ui.mount(paneOf(30))
+
+  // No row focused and no file previewed
+  await ui.press({ key: 'mention' })
+
+  // A # would end the path: nothing goes in
+  await $.ui.focus(ringOnto('row:issue#1.md'))
+  await ui.press({ key: 'mention' })
+
+  // The prompt box refuses the text
+  await $.ui.focus(ringOnto('row:a.txt'))
+  await ui.press({ key: 'mention' })
+
+  expect(insertsOf(prompt.fills)).toEqual(['@a.txt '])
+  expect(prompt.toasts).toEqual([
+    'Focus a row or preview a file to mention it',
+    'Cannot mention issue#1.md: Claude Code reads a # in a mention as a line range',
+    'The prompt box did not take the mention of a.txt',
+  ])
+
+  await ui.unmount()
+})
 
 for (const surface of ['terminal', 'desktop'] as const) {
   test(`browses the tree and previews files (${surface})`, async ($, on) => {

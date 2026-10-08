@@ -307,3 +307,30 @@ export function keyOf(root: string, path: string): string | null {
 
   return isUnderRoot ? parts.slice(rootParts.length).join('/') : null
 }
+
+/**
+ * The path from one entry of the tree to another, `/`-separated, climbing
+ * with `..` where it must.
+ *
+ * @param from the key of the folder the path starts in
+ * @param to the key of the entry it leads to
+ * @param style the root's style
+ * @returns the path, `.` when the two are one
+ */
+export function relativePathOf(from: string, to: string, style: PathStyle): string {
+  const fromParts = from === '' ? [] : from.split('/')
+  const toParts = to === '' ? [] : to.split('/')
+  let shared = 0
+
+  while (
+    shared < fromParts.length &&
+    shared < toParts.length &&
+    isSameKey(fromParts[shared] ?? '', toParts[shared] ?? '', style)
+  ) {
+    shared += 1
+  }
+
+  const parts = [...fromParts.slice(shared).map(() => '..'), ...toParts.slice(shared)]
+
+  return parts.length === 0 ? '.' : parts.join('/')
+}

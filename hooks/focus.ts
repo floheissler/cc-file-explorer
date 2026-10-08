@@ -74,6 +74,34 @@ export function focusOrderOf(tree: RenderElement): FocusOrder {
 }
 
 /**
+ * Where the ring rests in the shown focus order once it landed on an
+ * element. Claude Code keeps the ring at that place across a redraw, not on
+ * the element's key, so a redraw that adds rows above it rests it on
+ * another element.
+ *
+ * @param order the pane's focusable elements as drawn when the ring landed
+ * @param element the key it landed on; absent for Claude Code's own stops
+ * @returns the place, or null when it rests on none of the pane's shown
+ *   elements
+ */
+export function ringPlaceOf(order: FocusOrder, element: string | undefined): number | null {
+  const at = element === undefined ? -1 : order.shown.indexOf(element)
+
+  return at < 0 ? null : at
+}
+
+/**
+ * The element the ring rests on in a drawing: the one at its place.
+ *
+ * @param order the pane's focusable elements as last drawn
+ * @param place where the ring rests, from `ringPlaceOf`
+ * @returns its key, or undefined when nothing of the pane's is there
+ */
+export function ringElementOf(order: FocusOrder, place: number | null): string | undefined {
+  return place === null ? undefined : order.shown[place]
+}
+
+/**
  * Keeps the ring off the hidden elements, which Claude Code lists in the
  * focus order like any other. Moving onto one from the tree's last row stops
  * there, as a list stops at its end; from another shown element the ring
