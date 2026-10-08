@@ -1,5 +1,5 @@
 import type { FsEntry, On, PromptBox, PromptFillInput } from 'claude-code'
-import { expect, mock, test, type Engine } from 'claude-code/testing'
+import { expect, mock, test, type Engine, type Mounted } from 'claude-code/testing'
 
 import { pathTo, type ElementData } from './drawn'
 import { testPathOf } from './host'
@@ -354,8 +354,11 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.press({ key: 'preview-down' })
     expect(await ui.find({ type: 'Code' })).toMatchObject({ props: { startLine: 4 } })
 
-    // Pressing the previewed file again closes the preview
+    // Following the focus, pressing the previewed file again keeps it; `x`
+    // closes it
     await ui.press({ key: 'row:src/main.ts' })
+    expect(await ui.find({ type: 'Code' })).toMatchObject({ props: { startLine: 4 } })
+    await ui.press({ key: 'preview-close' })
     expect(await ui.find({ type: 'Code' })).toBeUndefined()
 
     // `c` closes one level, `e` opens one level again
@@ -383,6 +386,181 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.unmount()
   })
 }
+
+/**
+ * A mounted pane, as the waits below drive it.
+ */
+type Drawing = {
+  readonly find: Mounted['find']
+  readonly redraw: () => Promise<void>
+}
+
+/**
+ * Waits until `isDone` holds, a drawing at a time, for work the plugin left
+ * running in the background: a preview following the ring. Each drawing is
+ * a round trip through the engine, as the plugin's own calls are.
+ */
+async function until(ui: Drawing, isDone: () => boolean | Promise<boolean>, what: string): Promise<void> {
+  for (let turn = 0; turn < 100; turn += 1) {
+    if (await isDone()) {
+      return
+    }
+
+    await ui.redraw()
+  }
+
+  throw new Error(`waited too long for ${what}`)
+}
+
+/**
+ * Gives the plugin's background work a few drawings' time, so a check that
+ * it left something as it was means it.
+ */
+async function settle(ui: Drawing): Promise<void> {
+  for (let turn = 0; turn < 10; turn += 1) {
+    await ui.redraw()
+  }
+}
+
+
+/**
+ * The file the docked preview shows: a source preview by its path, Markdown
+ * as such; null while no preview is drawn.
+ */
+async function previewedOf(ui: Pick<Mounted, 'find'>): Promise<string | null> {
+  const code = await ui.find({ type: 'Code' })
+
+  if (code !== undefined) {
+    return String(code.props.path)
+  }
+
+  return (await ui.find({ type: 'Markdown' })) === undefined ? null : 'markdown'
+}
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`the preview follows the focus ring onto files until p pins it (${surface})`, async ($, on) => {
+    stubProject(on, FOLDERS, FILES)
+    recordFocus(on)
+    await openTree($)
+
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const previewed = (path: string | null) => until(ui, async () => (await previewedOf(ui)) === path, `${path}`)
+
+    await ui.press({ key: 'row:src' })
+
+    // A closed preview stays closed as the ring walks the tree
+    await $.ui.focus(ringOnto('row:README.md'))
+    await settle(ui)
+    expect(await previewedOf(ui)).toBeNull()
+
+    // Open, it shows each file the ring lands on, from its top, its row
+    // marked as the previewed one
+    await ui.press({ key: 'row:README.md' })
+    expect(await previewedOf(ui)).toBe('markdown')
+    await $.ui.focus(ringOnto('row:src/main.ts'))
+    await previewed('src/main.ts')
+    expect(await ui.find({ type: 'Code' })).toMatchObject({ props: { startLine: 1 } })
+    expect(await ui.find({ key: 'row:src/main.ts' })).toMatchObject({ props: { label: expect.stringContaining('• main.ts') } })
+
+    // A folder's row and the header's controls leave it as it is
+    await $.ui.focus(ringOnto('row:src'))
+    await $.ui.focus(ringOnto('refresh'))
+    await settle(ui)
+    expect(await previewedOf(ui)).toBe('src/main.ts')
+
+    // Pinned, it keeps its file as the ring moves, and says so
+    await ui.press({ key: 'preview-pin' })
+    expect(await ui.find({ key: 'preview-pin' })).toMatchObject({ props: { label: 'unpin', hotkey: 'p' } })
+    expect(await ui.find({ type: 'Text', text: /· pinned$/ })).toBeDefined()
+    await $.ui.focus(ringOnto('row:README.md'))
+    await settle(ui)
+    expect(await previewedOf(ui)).toBe('src/main.ts')
+
+    // A press shows another file, still pinned; on the pinned file, it closes
+    // the preview and lets go of the pin
+    await ui.press({ key: 'row:README.md' })
+    expect(await previewedOf(ui)).toBe('markdown')
+    expect(await ui.find({ key: 'preview-pin' })).toMatchObject({ props: { label: 'unpin' } })
+    await ui.press({ key: 'row:README.md' })
+    expect(await previewedOf(ui)).toBeNull()
+    await ui.press({ key: 'row:README.md' })
+    expect(await ui.find({ key: 'preview-pin' })).toMatchObject({ props: { label: 'pin' } })
+    expect(await ui.find({ type: 'Text', text: /pinned/ })).toBeUndefined()
+
+    // Let go of the pin, the preview moves to the ring's file at once
+    await ui.press({ key: 'preview-pin' })
+    await $.ui.focus(ringOnto('row:src/main.ts'))
+    await settle(ui)
+    expect(await previewedOf(ui)).toBe('markdown')
+    await ui.press({ key: 'preview-pin' })
+    await previewed('src/main.ts')
+
+    await ui.unmount()
+  })
+}
+
+test('the preview reads the file the ring stops on, drawing the one it shows until then', async ($, on) => {
+  const names = ['f0.txt', 'f1.txt', 'f2.txt', 'f3.txt']
+
+  // Each file's text waits until the test lets it go
+  const reads: { readonly path: string; readonly release: () => void }[] = []
+
+  on('session.root', () => ({ value: ROOT }))
+  on('ui.panes', () => ({ value: [] }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('fs.list', ($, e) => ({ value: testPathOf(e.path) === ROOT ? names.map(name => entry(name, 'file', 9)) : [] }))
+  on('fs.stat', () => ({ value: { kind: 'file', size: 9, mtimeMs: 0, isLink: false } }))
+  on(
+    'fs.read',
+    ($, e) =>
+      new Promise(resolve => {
+        const path = testPathOf(e.path)
+
+        reads.push({ path, release: () => resolve({ value: `text of ${path}` }) })
+      }),
+  )
+  recordFocus(on)
+  await openTree($)
+
+  const ui = await $.ui.mount(paneOf(30))
+  const sourceOf = async () => (await ui.find({ type: 'Code' }))?.props.source
+  const pressed = ui.press({ key: 'row:f0.txt' })
+
+  await until(ui, () => reads.length === 1, 'f0 to be read')
+  reads[0]?.release()
+  await pressed
+  expect(await sourceOf()).toBe(`text of ${ROOT}/f0.txt`)
+
+  // The ring walks three rows while f1 is read: f0 stays drawn, and of the
+  // rest only f3, where the ring stops, is read after it
+  await $.ui.focus(ringOnto('row:f1.txt'))
+  await until(ui, () => reads.length === 2, 'f1 to be read')
+  await $.ui.focus(ringOnto('row:f2.txt'))
+  await $.ui.focus(ringOnto('row:f3.txt'))
+  await settle(ui)
+  expect(await sourceOf()).toBe(`text of ${ROOT}/f0.txt`)
+
+  reads[1]?.release()
+  await until(ui, () => reads.length === 3, 'f3 to be read')
+  expect(await sourceOf()).toBe(`text of ${ROOT}/f0.txt`)
+  reads[2]?.release()
+  await until(ui, async () => (await sourceOf()) === `text of ${ROOT}/f3.txt`, 'f3 to show')
+  expect(reads.map(read => read.path)).toEqual([`${ROOT}/f0.txt`, `${ROOT}/f1.txt`, `${ROOT}/f3.txt`])
+
+  // A click asks twice, as the ring lands on the row and as it presses it:
+  // the file is read once
+  await $.ui.focus(ringOnto('row:f1.txt'))
+  const clicked = ui.press({ key: 'row:f1.txt' })
+
+  await until(ui, () => reads.length === 4, 'f1 to be read again')
+  reads[3]?.release()
+  await settle(ui)
+  expect(reads.length, 'reads of f1').toBe(4)
+  await clicked
+  expect(await sourceOf()).toBe(`text of ${ROOT}/f1.txt`)
+
+  await ui.unmount()
+})
 
 test('/tree closes the pane it opened', async ($, on) => {
   const closed: string[] = []

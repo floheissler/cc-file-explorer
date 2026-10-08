@@ -57,6 +57,11 @@ export type PaneActions = {
   toggleHelp: () => Promise<void>
   scrollPreview: (lines: number) => Promise<void>
   toggleMarkdownMode: () => Promise<void>
+  /**
+   * Pins the preview to the file it shows, or lets it follow the focus ring
+   * again, onto the ring's file.
+   */
+  togglePin: () => Promise<void>
   closePreview: () => Promise<void>
   refresh: () => Promise<void>
   /**
@@ -119,6 +124,10 @@ export type PaneModel = {
    */
   readonly preview: Preview | null
   readonly previewTop: number
+  /**
+   * Whether the preview keeps its file as the focus ring moves.
+   */
+  readonly isPinned: boolean
   readonly markdownMode: MarkdownMode
   /**
    * Whether the help view stands in for the tree and the preview.
@@ -410,9 +419,13 @@ function helpSectionsOf(seat: Seat): readonly HelpSection[] {
       ['a', 'mention the focused row to Claude at the prompt (@path), else the previewed file'],
       ['w  s', 'scroll the preview up, down'],
       ['m', 'Markdown preview: rendered or source'],
-      ['x', isInline ? 'close the file, back to the tree' : 'close the preview'],
+      ...(isInline ? [] : [['p', 'pin the preview to its file, or follow the focus again'] as const]),
+      ['x', isInline ? 'close the file, back to the tree' : 'close the preview; pinned, Enter on its file does too'],
       ['h', 'show or hide this help'],
-      ['Tab ↑ ↓', isInline ? 'move between rows; Enter shows a file' : 'move between rows; Enter opens'],
+      [
+        'Tab ↑ ↓',
+        isInline ? 'move between rows; Enter shows a file' : 'move between rows, the preview following; Enter opens',
+      ],
     ],
   }
 
@@ -431,7 +444,7 @@ function helpSectionsOf(seat: Seat): readonly HelpSection[] {
   const mouse: HelpSection = {
     title: 'Mouse',
     rows: [
-      ['click', 'open a folder, preview a file; again to close it'],
+      ['click', 'open or close a folder, preview a file'],
       ['wheel', 'scroll the tree or the preview under the pointer'],
     ],
   }
@@ -841,7 +854,7 @@ function previewTitleRow(kit: Kit, selected: string): RenderElement {
  */
 function inlineFileHeadRow(kit: Kit, model: PaneModel, selected: string): Fitted {
   const { Box, Text } = kit.ui
-  const controls = previewControlsOf(kit, model, { closeLabel: 'back', hasMention: true })
+  const controls = previewControlsOf(kit, model, { closeLabel: 'back', hasMention: true, hasPin: false })
 
   // The two rules take two cells each, set off from the name by the gap
   const { legend, room } = fitRow(kit.columns, legendsOf(controls), Limits.NAME_FLOOR_CELLS, {
@@ -867,9 +880,18 @@ function inlineFileHeadRow(kit: Kit, model: PaneModel, selected: string): Fitted
 
 /**
  * The previewed file's facts for its meta row, richest first, down to its
- * size alone: the row draws the richest that fits.
+ * size alone: the row draws the richest that fits. A pinned preview says so
+ * in each but the last.
  */
-function metaTextsOf(preview: Preview | null, markdownMode: MarkdownMode): string[] {
+function metaTextsOf(preview: Preview | null, markdownMode: MarkdownMode, isPinned: boolean): string[] {
+  const facts = fileFactsOf(preview, markdownMode)
+
+  return isPinned
+    ? [...facts.map(text => (text === '' ? 'pinned' : `${text} · pinned`)), facts.at(-1) ?? '']
+    : facts
+}
+
+function fileFactsOf(preview: Preview | null, markdownMode: MarkdownMode): string[] {
   if (preview === null) {
     return ['']
   }
@@ -893,15 +915,20 @@ function metaTextsOf(preview: Preview | null, markdownMode: MarkdownMode): strin
 
 /**
  * The previewed file's controls: scroll it (when it has lines), switch a
- * Markdown file's form, mention it where no header carries `a`, and close
- * it, `x` labelled for where it leads.
+ * Markdown file's form, pin it where the preview follows the focus ring
+ * (docked), mention it where no header carries `a`, and close it, `x`
+ * labelled for where it leads.
  */
 function previewControlsOf(
   kit: Kit,
   model: PaneModel,
-  { closeLabel, hasMention }: { readonly closeLabel: string; readonly hasMention: boolean },
+  {
+    closeLabel,
+    hasMention,
+    hasPin,
+  }: { readonly closeLabel: string; readonly hasMention: boolean; readonly hasPin: boolean },
 ): readonly ActionControl[] {
-  const { preview, markdownMode } = model
+  const { preview, markdownMode, isPinned } = model
   const isScrollable = preview !== null && lengthOf(preview) > 0
   const isMarkdown = preview?.kind === 'markdown'
 
@@ -922,6 +949,9 @@ function previewControlsOf(
           },
         ]
       : []),
+    ...(hasPin
+      ? [{ key: KEYS.previewPin, hotkey: 'p', label: isPinned ? 'unpin' : 'pin', onPress: kit.actions.togglePin }]
+      : []),
     ...(hasMention ? [mentionControlOf(kit)] : []),
     { key: KEYS.previewClose, hotkey: 'x', label: closeLabel, onPress: kit.actions.closePreview },
   ]
@@ -933,8 +963,8 @@ function previewControlsOf(
  */
 function previewMetaRow(kit: Kit, model: PaneModel): Fitted {
   const { Box, Text } = kit.ui
-  const controls = previewControlsOf(kit, model, { closeLabel: 'close', hasMention: false })
-  const facts = metaTextsOf(model.preview, model.markdownMode)
+  const controls = previewControlsOf(kit, model, { closeLabel: 'close', hasMention: false, hasPin: true })
+  const facts = metaTextsOf(model.preview, model.markdownMode, model.isPinned)
   const { legend, room } = fitRow(kit.columns, legendsOf(controls), cellWidth(facts.at(-1) ?? ''))
 
   return {

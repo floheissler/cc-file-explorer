@@ -11,7 +11,9 @@ without leaving the session.
 - **Browse** the project as a tree you expand and collapse in place, with the
   mouse or the keys.
 - **Preview** the file you pick: Markdown rendered as Claude's replies are,
-  CSV and TSV as tables, source with syntax colors and line numbers.
+  CSV and TSV as tables, source with syntax colors and line numbers. Once
+  open, the preview follows the focus from file to file, or stays on one
+  file you pin (`p`).
 - **See git's status** beside every name, and the files Claude wrote this
   session.
 - **Filter** the tree by name (`f`), or **jump** to any path with
@@ -84,7 +86,9 @@ on how Claude Code draws:
 
 - **Docked beside the conversation**, under fullscreen rendering
   (`/tui fullscreen`) on a terminal at least 110 columns wide. The tree and
-  the picked file's preview show together, and the mouse works.
+  the picked file's preview show together, the preview following the focus
+  (see [Follow or pin the preview](#follow-or-pin-the-preview)), and the
+  mouse works.
 - **Above the prompt**, under Claude Code's classic renderer, or under
   fullscreen on a narrower terminal. The pane is as tall as its content, up
   to 40 rows, and shows one view at a time: the tree, the picked file, or
@@ -120,21 +124,23 @@ narrow to dock the pane, it says once a session how wide the terminal must be.
 
 The header shows the tree's keys,
 `e: expand  c: collapse  r: refresh  f: filter  a: mention  h: help`, and a
-previewed file's row its own, `k: ↑  j: ↓  m: source  x: close`
+previewed file's row its own, `w: ↑  s: ↓  m: source  p: pin  x: close`
 (`a: mention  x: back` above the prompt); `h` opens a help view with all of
 them.
 
 In a narrow pane (the dock opens 40 columns wide on a 110-column terminal)
 the rows shorten to fit. The header's keys become `e c r f a  h: help`, then
 `h: help` alone; the project's name keeps at least 8 columns. A previewed
-file's facts shorten from size, lines and mode to its size, and its keys step
-down the same way. Every key keeps working, and the help view's
+file's facts shorten from size, lines, mode and `pinned` to its size, and its
+keys step down the same way. Every key keeps working, and the help view's
 descriptions wrap to the width.
 
 | Do this | To |
 | --- | --- |
 | Click a folder, or focus it and press Enter | Expand or collapse it |
 | Click a file, or focus it and press Enter | Preview it under the tree (docked), or in the tree's place (above the prompt) |
+| Move the focus onto a file, docked, with the preview open | Preview that file; a pinned preview stays where it is |
+| `p` | Pin the preview to its file, or let it follow the focus again (docked) |
 | `e` | Open every folder in view one level deeper; repeat for more |
 | `c` | Close the deepest open folders, one level; repeat for more |
 | `1` – `9` | Open folders exactly that many levels deep |
@@ -143,7 +149,7 @@ descriptions wrap to the width.
 | `f` | Filter the tree by name: shows the filter's field over the tree, the keyboard in it; again to close the filter |
 | `a` | Mention the focused row to Claude at the prompt's cursor (`@src/`, `@README.md`), or the previewed file when no row has the focus |
 | `h` | Show or hide the help view |
-| Click the previewed file again (docked), or press `x` | Close the preview |
+| `x`, or click a pinned preview's file again (docked) | Close the preview |
 | `m` | Switch a Markdown preview between rendered and source |
 | Wheel over the tree or the preview (fullscreen only) | Scroll that part alone, as far per notch as the conversation scrolls (`/scroll-speed`); the header stays put |
 | `w` / `s`, Page Up / Page Down | Scroll the preview |
@@ -155,6 +161,25 @@ descriptions wrap to the width.
 stop early; press again to go further.
 
 Keys work while the pane has the keyboard: click it, or press Ctrl+X then Tab.
+
+### Follow or pin the preview
+
+Docked, an open preview follows the focus: as Tab, the arrows or a click
+land on a file, the preview shows it from its top. A folder's row and the
+header's controls leave it as it is. Walking quickly reads only the file
+the focus stops on, and the file shown stays drawn until the next one is
+read.
+
+- Enter or a click on the file the preview shows keeps it; `x` closes the
+  preview.
+- `p` pins the preview to its file, and its row of facts says `pinned`. The
+  focus then moves without changing it; Enter or a click on another file
+  shows that file, still pinned, and on the pinned file closes the preview.
+- `p` again lets go, and the preview moves to the focused file at once.
+  Closing the preview lets go too: the next file you preview follows the
+  focus again.
+- Above the prompt the file and the tree never show together, so nothing
+  follows there: Enter shows a file in the tree's place.
 
 ### Mention a file to Claude
 
@@ -345,7 +370,7 @@ each one.
 | `command.run` of `tree` | Opens the pane on its tree, focused (above the prompt: up to 40 rows, closed by Esc under the classic renderer), reads git's status beside it, and starts its checks for outside changes, or closes it when it is shown; a session's first open starts from the project's saved folders; leaves the one-time tip. With a path, closes a filter first, places the path under the root (an absolute one spelled through a link by where it lands), finds it folder by folder, each folder read afresh, opens its folders, picks a file, and moves the whole tree's window to its row, never closing the pane |
 | `ui.render` of the `Pane` | Draws for where the pane sits. Docked: the header, the filter's row while it is shown, the tree's window (filtered while the filter holds a query) and, set off by a blank row and a rule with the file's name, the preview's window, each exactly as tall as its region. Above the prompt: one view, the tree or the file or the help, as tall as its content. Rows carry their markers. Reads what the drawing needs but lacks |
 | `ui.scroll` of the pane | Moves the tree's or the preview's own window by the region under the pointer, as far as the wheel's rows say; the engine's window over the pane stays still |
-| `ui.focus` in the pane | Keeps the focused row and its neighbors in view, so the arrows always have a drawn row to move to, and lands the focus where that row is drawn after the window moves; brings the focus into the pane at the tree's first row, ahead of the header's controls, and wraps it back there; keeps the focus off the hidden digit keys; records where the focus rests, for `a` to mention the row it marks. The row `/tree <path>` revealed keeps the focus's start until you move it, and the row `a` mentioned until the focus lands anywhere |
+| `ui.focus` in the pane | Keeps the focused row and its neighbors in view, so the arrows always have a drawn row to move to, and lands the focus where that row is drawn after the window moves; brings the focus into the pane at the tree's first row, ahead of the header's controls, and wraps it back there; keeps the focus off the hidden digit keys; records where the focus rests, for `a` to mention the row it marks; docked, shows the file it lands on in an open preview that is not pinned. The row `/tree <path>` revealed keeps the focus's start until you move it, and the row `a` mentioned until the focus lands anywhere |
 | `ui.close` of the pane | Above the prompt, a person's close steps back first: from the file or the help to the tree, from a filtered tree to the whole tree; a close that goes through stops the checks for outside changes |
 | `tool.call` of `Write`, `Edit`, `NotebookEdit`, `Bash`, `PowerShell` | After a call that may have written (not held read-only, not denied), re-reads an open pane's tree, preview, git status and, while filtering, file list once Claude pauses; after an edit that went through, marks its file as written this session |
 | `classic.SessionStart` after `/clear`, `/resume`, `/branch` | Forgets what was read, as the session state resets, and opens the tree again where the project's folders were saved |
@@ -369,8 +394,9 @@ fullscreen tip was shown, and the open folders of the 50 projects changed
 most recently, as paths relative to each project's root.
 `claude plugin validate .` prints the same list from the source.
 
-The person's view (open folders, the previewed file, where each window
-stands, the filter's query) and the files Claude wrote this session live in
+The person's view (open folders, the previewed file and whether it is
+pinned, where each window stands, the filter's query) and the files Claude
+wrote this session live in
 `$.state`, so they survive a reload of the module and `/clear` starts
 afresh; what was read from disk, the filter's file list and git's status
 among it, lives in the module and is read again as needed. The whole

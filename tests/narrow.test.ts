@@ -134,11 +134,16 @@ const VIEWS: readonly {
    * means to: docked always, inline unless the file view stands in.
    */
   readonly shows?: string
+  /**
+   * Whether only the dock draws the view's controls.
+   */
+  readonly isDockOnly?: true
 }[] = [
   { name: 'tree', presses: [] },
   { name: 'tree 9 deep', presses: ['depth-9'] },
   { name: 'Markdown', presses: ['row:README.md'] },
   { name: 'Markdown source', presses: ['row:README.md', 'preview-mode'] },
+  { name: 'pinned', presses: ['row:README.md', 'preview-pin'], shows: 'preview-pin', isDockOnly: true },
   { name: 'code', presses: ['row:main-with-a-rather-long-name.ts'] },
   { name: 'notice', presses: ['row:archive.zip'] },
   { name: 'table', presses: ['row:data.csv'] },
@@ -162,7 +167,7 @@ const SEATS = [
 
 describe('rows fit the body at every width', () => {
   for (const seat of SEATS) {
-    for (const view of VIEWS) {
+    for (const view of VIEWS.filter(shown => shown.isDockOnly !== true || seat.placement === 'dock')) {
       test(`${view.name}, ${seat.name}`, async ($, on) => {
         stubProject(on)
         await openTree($, seat.isFullscreen)

@@ -16,6 +16,7 @@ import {
   type FilterView,
 } from './filter'
 import { focusOrderOf, focusStepOf, ringElementOf, ringPlaceOf, type FocusOrder } from './focus'
+import { followedFileOf, pressStepOf } from './follow'
 import { hasStampMoved, isSameRead, readGitStatus, stampsOf, type GitRead } from './git'
 import type { Host } from './host'
 import {
@@ -98,6 +99,7 @@ const EXPANDED = atom({ plugin: 'file-explorer', key: 'expanded' } as const, [])
 const SELECTED = atom({ plugin: 'file-explorer', key: 'selected' } as const, null)
 const TREE_TOP = atom({ plugin: 'file-explorer', key: 'treeTop' } as const, 0)
 const PREVIEW_TOP = atom({ plugin: 'file-explorer', key: 'previewTop' } as const, 0)
+const PINNED = atom({ plugin: 'file-explorer', key: 'pinned' } as const, false)
 const MARKDOWN_MODE = atom({ plugin: 'file-explorer', key: 'markdownMode' } as const, 'rendered')
 const HELP_SHOWN = atom({ plugin: 'file-explorer', key: 'helpShown' } as const, false)
 const FILTER = atom({ plugin: 'file-explorer', key: 'filter' } as const, null)
@@ -194,6 +196,12 @@ function hostOf($: EngineInterface): Host {
         get: () => read($, PREVIEW_TOP),
         set: async fn => {
           await update($, PREVIEW_TOP, fn)
+        },
+      },
+      pinned: {
+        get: () => read($, PINNED),
+        set: async fn => {
+          await update($, PINNED, fn)
         },
       },
       markdownMode: {
@@ -295,7 +303,8 @@ export const register: Register = on => {
 
   /**
    * Notes where the ring went: the element it landed on, and its place in
-   * the drawing it landed in. The row `a` left lets go of the ring then.
+   * the drawing it landed in. The row `a` left lets go of the ring then, and
+   * a preview that follows the ring shows the file it landed on.
    */
   const noteRing = (host: Host, element: string | undefined, place: number | null) => {
     lastFocused = element
@@ -305,6 +314,9 @@ export const register: Register = on => {
       ringReturn = null
       host.invalidate()
     }
+
+    // The ring moves on at once; the preview catches up once the file is read
+    void followRing(host, element).catch(() => undefined)
   }
 
   /**
@@ -336,6 +348,31 @@ export const register: Register = on => {
    * narrow to dock the pane.
    */
   let hasToldWiden = false
+
+  /**
+   * Switches of the preview to another file, one at a time: the one asked
+   * for next, which a later ask replaces, so walking the tree reads the file
+   * the ring stops on, not each one it passed; the run under way; and a
+   * generation `forget` moves on, dropping both.
+   */
+  const switching = {
+    next: null as {
+      readonly host: Host
+      readonly path: string
+      readonly isFollow: boolean
+      readonly generation: number
+    } | null,
+    run: null as Promise<void> | null,
+    generation: 0,
+  }
+
+  /**
+   * The preview drawn while a switch to another file waits for the session
+   * state to name it: the file read is `preview` from the moment it is read,
+   * and this one stays drawn until then, so the title, the facts and the
+   * text switch together.
+   */
+  let leaving: Preview | null = null
 
   /**
    * The polls for changes made outside Claude, while the pane is open: one
@@ -410,6 +447,9 @@ export const register: Register = on => {
     preview = null
     previewLoad = null
     previewStamp = null
+    leaving = null
+    switching.next = null
+    switching.generation += 1
     drawn = null
     room = null
     revealed = null
@@ -768,6 +808,108 @@ export const register: Register = on => {
   }
 
   /**
+   * Shows a file in the preview from its top: read first, then named in the
+   * session state, `leaving` drawn meanwhile. A later switch to another file
+   * waiting, or `forget`, drops it; a follow of the ring lapses where the
+   * preview was closed or pinned since the ring moved, and a pick of the
+   * person's never does. A file the preview shows already is left as it is.
+   */
+  const switchOnce = async (host: Host, path: string, isFollow: boolean, generation: number) => {
+    const isWanted = async () => {
+      const [selected, isPinned] = await Promise.all([host.state.selected.get(), host.state.pinned.get()])
+
+      // A click on a file asks twice, as the ring lands on its row and as it
+      // presses it: the second ask waits for this one
+      const isReplaced = switching.next !== null && switching.next.path !== path
+
+      return (
+        !isReplaced &&
+        generation === switching.generation &&
+        selected !== path &&
+        !(isFollow && (selected === null || isPinned))
+      )
+    }
+
+    if (!(await isWanted())) {
+      return
+    }
+
+    const opened = await ensureListing(host)
+    const loaded = await readPreview(host, opened.root, path)
+
+    if (!(await isWanted())) {
+      return
+    }
+
+    // A read of the leaving file still under way is dropped
+    leaving = preview
+    preview = loaded.preview
+    previewStamp = { path, stamp: loaded.stamp }
+    previewLoad = null
+
+    try {
+      // A follow never opens a preview closed meanwhile
+      await Promise.all([
+        host.state.selected.set(current => (isFollow && current === null ? null : path)),
+        host.state.previewTop.set(() => 0),
+      ])
+    } finally {
+      leaving = null
+    }
+  }
+
+  /**
+   * Asks for the preview to show a file, after any switch under way.
+   *
+   * @param isFollow whether the ring's move asks it, not the person's pick
+   * @returns settles once the switches asked for so far have run
+   */
+  const switchPreview = (host: Host, path: string, isFollow: boolean): Promise<void> => {
+    switching.next = { host, path, isFollow, generation: switching.generation }
+
+    switching.run ??= (async () => {
+      try {
+        while (switching.next !== null) {
+          const ask = switching.next
+
+          switching.next = null
+
+          // A failed switch leaves the preview as it was, and the next runs
+          await switchOnce(ask.host, ask.path, ask.isFollow, ask.generation).catch(() => undefined)
+        }
+      } finally {
+        switching.run = null
+      }
+    })()
+
+    return switching.run
+  }
+
+  /**
+   * Shows the file of the row the ring landed on, docked, in a preview that
+   * is open and follows the ring.
+   */
+  const followRing = async (host: Host, element: string | undefined) => {
+    const rows = drawn?.rows ?? []
+    const { placement } = seat
+    const [selected, isPinned] = await Promise.all([host.state.selected.get(), host.state.pinned.get()])
+    const path = followedFileOf(element, rows, { selected, isPinned, placement })
+
+    if (path !== null) {
+      await switchPreview(host, path, true)
+    }
+  }
+
+  /**
+   * Closes the preview, inline back to the tree, and lets go of its pin: the
+   * next file previewed follows the ring again.
+   */
+  const closePreview = async (host: Host) => {
+    isFileShown = false
+    await Promise.all([host.state.selected.set(() => null), host.state.pinned.set(() => false)])
+  }
+
+  /**
    * Moves the tree's window so a row and its neighbors show, under the
    * layout the pane has with or without a preview.
    */
@@ -835,10 +977,8 @@ export const register: Register = on => {
       dirs => readDirs(host, opened, dirs),
     )
 
-    if (!isDir && (await host.state.selected.get()) !== entry.path) {
-      await loadPreview(host, entry.path)
-      await host.state.previewTop.set(() => 0)
-      await host.state.selected.set(() => entry.path)
+    if (!isDir) {
+      await switchPreview(host, entry.path, false)
     }
 
     const hasPreview = (await host.state.selected.get()) !== null
@@ -1306,28 +1446,26 @@ export const register: Register = on => {
 
       // Inline, a file takes the tree's place; picked again, it shows again
       if (seat.placement === 'inline') {
-        if ((await host.state.selected.get()) !== path) {
-          await loadPreview(host, path)
-          await host.state.previewTop.set(() => 0)
-          await host.state.selected.set(() => path)
-        }
-
+        await switchPreview(host, path, false)
         isFileShown = true
         host.invalidate()
 
         return
       }
 
-      if ((await host.state.selected.get()) === path) {
-        await host.state.selected.set(() => null)
+      const [selected, isPinned] = await Promise.all([host.state.selected.get(), host.state.pinned.get()])
 
-        return
+      switch (pressStepOf(path, selected, isPinned)) {
+        case 'keep':
+          return
+        case 'close':
+          await closePreview(host)
+
+          return
+        case 'show':
+          await switchPreview(host, path, false)
+          await revealRow(host, path, true)
       }
-
-      await loadPreview(host, path)
-      await host.state.previewTop.set(() => 0)
-      await host.state.selected.set(() => path)
-      await revealRow(host, path, true)
     },
 
     scrollPreview: lines => scrollPreviewBy(host, lines * Limits.KEY_ROWS),
@@ -1373,10 +1511,16 @@ export const register: Register = on => {
       await host.state.markdownMode.set(mode => (mode === 'rendered' ? 'source' : 'rendered'))
     },
 
-    closePreview: async () => {
-      isFileShown = false
-      await host.state.selected.set(() => null)
+    togglePin: async () => {
+      await host.state.pinned.set(pinned => !pinned)
+
+      // Let go, the preview shows the file the ring rests on at once
+      if (!(await host.state.pinned.get())) {
+        await followRing(host, ringElementOf(focusOrder, ringPlace))
+      }
     },
+
+    closePreview: () => closePreview(host),
 
     refresh: () => refresh(host),
 
@@ -1599,12 +1743,13 @@ export const register: Register = on => {
     const host = hostOf($)
     const { Box, Text, Button, Code, Markdown, Input } = $.ui.resolve(e)
 
-    const [expanded, selected, treeTop, previewTop, markdownMode, helpShown, filterText, written] =
+    const [expanded, selected, treeTop, previewTop, isPinned, markdownMode, helpShown, filterText, written] =
       await Promise.all([
         read($, EXPANDED),
         read($, SELECTED),
         read($, TREE_TOP),
         read($, PREVIEW_TOP),
+        read($, PINNED),
         read($, MARKDOWN_MODE),
         read($, HELP_SHOWN),
         read($, FILTER),
@@ -1649,7 +1794,10 @@ export const register: Register = on => {
         ? NO_MARKS
         : treeMarksOf(rows, gitRead?.root === current.root ? gitRead.status : null, written, styleOf(current.root))
 
-    const isPreviewStale = selected !== null && preview?.path !== selected
+    // The file read for the selection, or while a switch waits for the state
+    // to name the next, the one it leaves
+    const inHand = preview?.path === selected ? preview : leaving?.path === selected ? leaving : null
+    const isPreviewStale = selected !== null && inHand === null
 
     if (isPreviewStale && previewLoad !== selected) {
       void loadPreview(host, selected)
@@ -1675,7 +1823,7 @@ export const register: Register = on => {
       e.props.bodyColumns - (seat.placement === 'dock' ? Limits.RIGHT_PAD_COLUMNS : 0),
     )
 
-    const shownPreview = isPreviewStale ? null : preview
+    const shownPreview = inHand
     const inlineView = seat.placement === 'inline' ? inlineViewOf({ helpShown, isFileShown, selected }) : null
 
     // The filter's row sits over the tree, whole or filtered; the help and an
@@ -1729,6 +1877,7 @@ export const register: Register = on => {
         revealed,
         preview: shownPreview,
         previewTop,
+        isPinned,
         markdownMode,
         helpShown,
         filter,

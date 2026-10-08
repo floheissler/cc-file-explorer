@@ -39,6 +39,7 @@ export type PaneState = {
   readonly selected: StateCell<string | null>
   readonly treeTop: StateCell<number>
   readonly previewTop: StateCell<number>
+  readonly pinned: StateCell<boolean>
   readonly markdownMode: StateCell<MarkdownMode>
   readonly helpShown: StateCell<boolean>
   readonly filter: StateCell<string | null>
