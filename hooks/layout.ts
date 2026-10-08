@@ -1,9 +1,9 @@
 import Limits from './limits'
 
 /**
- * How the pane's body is split, top to bottom: the header row, the tree,
- * and while a file is previewed its head (a blank row, its title rule and
- * its meta row) and its text.
+ * How the pane's body is split, top to bottom: the header row, the filter's
+ * row while it is shown, the tree, and while a file is previewed its head
+ * (a blank row, its title rule and its meta row) and its text.
  */
 export type PaneLayout = {
   readonly bodyRows: number
@@ -26,10 +26,19 @@ export type Region = 'header' | 'tree' | 'preview-head' | 'preview'
 
 const HEADER_ROWS = 1
 /**
+ * The filter's row: its field and what it found.
+ */
+const FILTER_ROWS = 1
+/**
  * A blank row setting the preview off from the tree, the rule that carries
  * the file's name, and the row of its size and controls.
  */
 const PREVIEW_HEAD_ROWS = 3
+
+/**
+ * The rows above the tree: the header, and the filter's row while shown.
+ */
+const headRowsOf = (hasFilter: boolean) => HEADER_ROWS + (hasFilter ? FILTER_ROWS : 0)
 
 /**
  * Splits a body of `bodyRows` rows: the tree alone, or the tree over the
@@ -37,23 +46,24 @@ const PREVIEW_HEAD_ROWS = 3
  *
  * @param bodyRows the rows the pane's body has
  * @param hasPreview whether a file is previewed
+ * @param hasFilter whether the filter's row is shown above the tree
  * @returns the layout
  */
-export function paneLayoutOf(bodyRows: number, hasPreview: boolean): PaneLayout {
-  const rows = Math.max(HEADER_ROWS + 1, bodyRows)
-  const treeRow = HEADER_ROWS
+export function paneLayoutOf(bodyRows: number, hasPreview: boolean, hasFilter = false): PaneLayout {
+  const treeRow = headRowsOf(hasFilter)
+  const rows = Math.max(treeRow + 1, bodyRows)
 
   if (!hasPreview) {
     return {
       bodyRows: rows,
       treeRow,
-      treeRows: rows - HEADER_ROWS,
+      treeRows: rows - treeRow,
       previewRow: rows,
       previewRows: 0,
     }
   }
 
-  const shared = Math.max(2, rows - HEADER_ROWS - PREVIEW_HEAD_ROWS)
+  const shared = Math.max(2, rows - treeRow - PREVIEW_HEAD_ROWS)
   const isRoomy = shared >= Limits.MIN_TREE_ROWS + Limits.MIN_PREVIEW_ROWS
 
   const treeRows = isRoomy
@@ -121,36 +131,50 @@ export function inlineViewOf(state: {
 
 /**
  * How an inline pane's body is split: its header (the tree's, or the file's
- * head row) and the one view under it, as tall as its content and at most
- * what the room leaves. The frame of an inline pane fits what is drawn, so a
- * short tree takes few rows. The help is drawn whole: taller than the room,
- * Claude Code's window over the pane scrolls it.
+ * head row), the filter's row over the tree while shown, and the one view
+ * under them, as tall as its content and at most what the room leaves. The
+ * frame of an inline pane fits what is drawn, so a short tree takes few
+ * rows. The help is drawn whole: taller than the room, Claude Code's window
+ * over the pane scrolls it.
  *
  * @param bodyRows the most rows the pane may take
  * @param view the view shown
  * @param contentRows the rows the view's content would take
+ * @param hasFilter whether the filter is shown; its row sits over the tree
  * @returns the layout
  */
-export function inlineLayoutOf(bodyRows: number, view: InlineView, contentRows: number): PaneLayout {
-  const room = Math.max(1, bodyRows - HEADER_ROWS)
+export function inlineLayoutOf(
+  bodyRows: number,
+  view: InlineView,
+  contentRows: number,
+  hasFilter = false,
+): PaneLayout {
+  const headRows = headRowsOf(hasFilter && view === 'tree')
+  const room = Math.max(1, bodyRows - headRows)
   const rows = Math.max(1, view === 'help' ? contentRows : Math.min(contentRows, room))
 
   return {
-    bodyRows: HEADER_ROWS + rows,
-    treeRow: HEADER_ROWS,
+    bodyRows: headRows + rows,
+    treeRow: headRows,
     treeRows: view === 'tree' ? rows : 0,
-    previewRow: view === 'file' ? HEADER_ROWS : HEADER_ROWS + rows,
+    previewRow: view === 'file' ? headRows : headRows + rows,
     previewRows: view === 'file' ? rows : 0,
   }
 }
 
 /**
  * Where closing an inline pane by hand (Esc, its close mark) takes it first:
- * from the file or the help back to the tree; from the tree it closes.
+ * from the file or the help back to the tree, from a filtered tree to the
+ * whole tree; from the whole tree it closes.
  *
  * @param view the view shown
- * @returns the view to step back to, or null to close
+ * @param hasFilter whether the filter is shown
+ * @returns the step back, or null to close
  */
-export function escapeStepOf(view: InlineView): InlineView | null {
-  return view === 'tree' ? null : 'tree'
+export function escapeStepOf(view: InlineView, hasFilter = false): 'tree' | 'unfilter' | null {
+  if (view !== 'tree') {
+    return 'tree'
+  }
+
+  return hasFilter ? 'unfilter' : null
 }

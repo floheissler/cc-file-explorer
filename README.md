@@ -52,12 +52,12 @@ The first time `/tree` opens under the classic renderer, it leaves a one-line
 tip about `/tui fullscreen`, and never again. On a fullscreen terminal too
 narrow to dock the pane, it says once a session how wide the terminal must be.
 
-The header shows the tree's keys, `e: expand  c: collapse  r: refresh  h: help`,
+The header shows the tree's keys, `e: expand  c: collapse  r: refresh  f: filter  h: help`,
 and a previewed file's row its own, `k: ↑  j: ↓  m: source  x: close` (`x: back`
 above the prompt); `h` opens a help view with all of them.
 
 In a narrow pane (the dock opens 40 columns wide on a 110-column terminal)
-the rows shorten to fit. The header's keys become `e c r  h: help`, then
+the rows shorten to fit. The header's keys become `e c r f  h: help`, then
 `h: help` alone; the project's name keeps at least 8 columns. A previewed
 file's facts shorten from size, lines and mode to its size, and its keys step
 down the same way. Every key keeps working, and the help view's
@@ -72,6 +72,7 @@ descriptions wrap to the width.
 | `1` – `9` | Open folders exactly that many levels deep |
 | `0` | Close every folder |
 | `r` | Re-read the tree and the previewed file at once |
+| `f` | Filter the tree by name: shows the filter's field over the tree, the keyboard in it; again to close the filter |
 | `h` | Show or hide the help view |
 | Click the previewed file again (docked), or press `x` | Close the preview |
 | `m` | Switch a Markdown preview between rendered and source |
@@ -113,6 +114,35 @@ The tree and the open preview keep up with the disk:
 - A previewed file that is deleted shows a notice in place of its text, and
   comes back if the file does.
 
+### Filter by name
+
+`f` shows a field over the tree and puts the keyboard in it. As you type,
+the tree narrows to the files and folders whose names match, under the
+folders that hold them, opened; the field's row counts the matches.
+
+- Words match parts of names in any case (`readme` finds `README.md`), and
+  every word must match (`button test` finds `Button.test.tsx`). A word
+  with a `/` matches the path from the project root (`src/comp`).
+- Enter takes the focus to the first match; with nothing typed, it closes
+  the filter. ↓ moves from the field into the tree, ↑ from the tree's top
+  back to it.
+- Folders open and close in the filtered tree as in the whole tree, and
+  `e`, `c` and the digits work on it. A matched folder opens to everything
+  it holds.
+- `f` again closes the filter. The whole tree comes back as it was, with a
+  file picked while filtering shown in it, its folders opened.
+- Above the prompt under the classic renderer, Esc in the field closes the
+  filter first; elsewhere Esc gives the keyboard back to the prompt, as in
+  the rest of the pane.
+
+In a git work tree, the filter searches what git lists: the tracked files,
+the untracked ones it does not ignore, and what it ignores by name only, so
+`node_modules` and `dist` match as folders but what they hold does not.
+Elsewhere it walks the folders, at most 1,000 of them. It shows at most 500
+matches (`500 of 2,140`); type more to narrow. The list is read when the
+filter opens, and again after Claude's edits, a press of `r`, or a change
+the checks notice in a folder the filtered tree shows.
+
 ### What the preview shows
 
 | File | Preview |
@@ -153,25 +183,28 @@ Known limits:
 | --- | --- |
 | `session.start` | Registers `/tree`; after a reload of the module, starts the checks again for a pane still open |
 | `command.run` of `tree` | Opens the pane on its tree, focused (above the prompt: up to 40 rows, closed by Esc under the classic renderer), and starts its checks for outside changes, or closes it when it is shown; leaves the one-time tip |
-| `ui.render` of the `Pane` | Draws for where the pane sits. Docked: the header, the tree's window and, set off by a blank row and a rule with the file's name, the preview's window, each exactly as tall as its region. Above the prompt: one view, the tree or the file or the help, as tall as its content. Reads what the drawing needs but lacks |
+| `ui.render` of the `Pane` | Draws for where the pane sits. Docked: the header, the filter's row while it is shown, the tree's window (filtered while the filter holds a query) and, set off by a blank row and a rule with the file's name, the preview's window, each exactly as tall as its region. Above the prompt: one view, the tree or the file or the help, as tall as its content. Reads what the drawing needs but lacks |
 | `ui.scroll` of the pane | Moves the tree's or the preview's own window by the region under the pointer, as far as the wheel's rows say; the engine's window over the pane stays still |
 | `ui.focus` in the pane | Keeps the focused row and its neighbors in view, so the arrows always have a drawn row to move to, and lands the focus where that row is drawn after the window moves; keeps the focus off the hidden digit keys |
-| `ui.close` of the pane | Above the prompt, a person's close steps back from the file or the help to the tree first; a close that goes through stops the checks for outside changes |
-| `tool.call` of `Write`, `Edit`, `NotebookEdit`, `Bash`, `PowerShell` | After a call that may have written (not held read-only, not denied), re-reads an open pane's tree and preview once Claude pauses |
+| `ui.close` of the pane | Above the prompt, a person's close steps back first: from the file or the help to the tree, from a filtered tree to the whole tree; a close that goes through stops the checks for outside changes |
+| `tool.call` of `Write`, `Edit`, `NotebookEdit`, `Bash`, `PowerShell` | After a call that may have written (not held read-only, not denied), re-reads an open pane's tree, preview and, while filtering, file list once Claude pauses |
 | `classic.SessionStart` after `/clear`, `/resume`, `/branch` | Forgets what was read, as the session state resets |
 
 It calls `$.session.root`, `$.fs.list`, `$.fs.stat`, `$.fs.read`,
-`$.clock.after`, `$.command.register`, `$.ui.open`, `$.ui.close`,
-`$.ui.panes`, `$.ui.resolve`, `$.ui.invalidate`, `$.ui.log`, `$.ui.toast`,
-`$.store.get`, `$.store.set` and its own `$.state`. It makes no network
-calls, starts no processes and writes no files of its own; its one stored
-value, whether the fullscreen tip was shown, lives in the store Claude Code
-keeps for each plugin.
+`$.process.run`, `$.clock.after`, `$.command.register`, `$.ui.open`,
+`$.ui.close`, `$.ui.panes`, `$.ui.resolve`, `$.ui.invalidate`, `$.ui.focus`,
+`$.ui.log`, `$.ui.toast`, `$.store.get`, `$.store.set` and its own
+`$.state`. It makes no network calls and writes no files of its own. The
+one process it starts is `git ls-files`, which only reads, for the filter's
+file list, with `GIT_OPTIONAL_LOCKS=0` so it never takes a lock a commit
+beside it needs. Its one stored value, whether the fullscreen tip was
+shown, lives in the store Claude Code keeps for each plugin.
 `claude plugin validate .` prints the same list from the source.
 
 The person's view (open folders, the previewed file, where each window
-stands) lives in `$.state`, so it survives a reload of the module; what was
-read from disk lives in the module and is read again as needed.
+stands, the filter's query) lives in `$.state`, so it survives a reload of
+the module; what was read from disk, the filter's file list among it, lives
+in the module and is read again as needed.
 
 ## Develop
 

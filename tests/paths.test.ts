@@ -1,6 +1,15 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { extensionOf, nameOf, nativePathOf, rootLabelOf, rootOf, styleOf } from '../hooks/paths'
+import {
+  ancestorsOf,
+  extensionOf,
+  foldKey,
+  nameOf,
+  nativePathOf,
+  rootLabelOf,
+  rootOf,
+  styleOf,
+} from '../hooks/paths'
 
 describe('styleOf', () => {
   test('reads Windows off a drive or a backslash network spelling', async () => {
@@ -68,5 +77,20 @@ describe('nameOf and extensionOf', () => {
     expect(nameOf('README.md')).toBe('README.md')
     expect(nameOf('dir/a\\b.md')).toBe('a\\b.md')
     expect(extensionOf('dir/a\\b.MD')).toBe('md')
+  })
+})
+
+describe('ancestorsOf', () => {
+  test('lists the folders that hold a key, outermost first', async () => {
+    expect(ancestorsOf('a/b/c.ts')).toEqual(['a', 'a/b'])
+    expect(ancestorsOf('README.md')).toEqual([])
+  })
+})
+
+describe('foldKey', () => {
+  test('folds case under win32 only, and composes accents everywhere', async () => {
+    expect(foldKey('Src/Main.ts', 'win32')).toBe('src/main.ts')
+    expect(foldKey('Src/Main.ts', 'posix')).toBe('Src/Main.ts')
+    expect(foldKey('café.md', 'posix')).toBe('café.md')
   })
 })

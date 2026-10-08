@@ -98,6 +98,25 @@ const Limits = {
    * stops and says so.
    */
   MAX_LEVEL_FOLDERS: 200,
+  /**
+   * The quiet time after the last keystroke in the filter before the tree
+   * narrows to it.
+   */
+  FILTER_DEBOUNCE_MS: 150,
+  /**
+   * Matches a filtered tree shows at most; the filter's row counts the rest.
+   */
+  MAX_FILTER_MATCHES: 500,
+  /**
+   * How long a git call listing the project's files may run.
+   */
+  GIT_TIMEOUT_MS: 10_000,
+  /**
+   * Folders the filter reads at most outside a git work tree, shallowest
+   * first, and the entries it collects at most.
+   */
+  MAX_WALK_FOLDERS: 1_000,
+  MAX_WALK_ENTRIES: 100_000,
 } as const
 
 export default Limits

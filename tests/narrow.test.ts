@@ -2,6 +2,7 @@ import type { FsEntry, On } from 'claude-code'
 import { describe, expect, test, type Engine } from 'claude-code/testing'
 
 import { hotkeysOf, overflowsOf } from './drawn'
+import { filterKeyOf } from '../hooks/names'
 import { maxPreviewTop, previewOf, sourceColumnsOf } from '../hooks/preview'
 
 const ROOT = '/work/an-unusually-long-project-folder-name'
@@ -52,6 +53,20 @@ function stubProject(on: On): void {
   on('session.root', () => ({ value: ROOT }))
   on('ui.panes', () => ({ value: [] }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.focus', () => ({}))
+
+  // git lists every file for the filter, and ignores and deletes none
+  on('process.run', ($, e) => ({
+    value: {
+      exitCode: 0,
+      stdout: e.argv.includes('--cached')
+        ? Object.keys(FILES).map(path => `${path.slice(ROOT.length + 1)}\0`).join('')
+        : '',
+      stderr: '',
+      isStdoutTruncated: false,
+      isStderrTruncated: false,
+    },
+  }))
   on('fs.list', ($, e) => ({ value: FOLDERS[e.path] ?? [] }))
   on('fs.stat', ($, e) => ({
     value: {
@@ -75,9 +90,20 @@ const openTree = ($: Engine, isFullscreen: boolean) =>
 const WIDTHS = [16, 24, 32, 40, 60, 120] as const
 
 /**
- * Each view the sweep draws, reached by presses from the tree.
+ * Each view the sweep draws, reached from the tree by presses, then a query
+ * submitted in the filter, then presses again.
  */
-const VIEWS: readonly { readonly name: string; readonly presses: readonly string[] }[] = [
+const VIEWS: readonly {
+  readonly name: string
+  readonly presses: readonly string[]
+  readonly query?: string
+  readonly then?: readonly string[]
+  /**
+   * An element the view draws, by key, so the sweep checks the view it
+   * means to: docked always, inline unless the file view stands in.
+   */
+  readonly shows?: string
+}[] = [
   { name: 'tree', presses: [] },
   { name: 'tree 9 deep', presses: ['depth-9'] },
   { name: 'Markdown', presses: ['row:README.md'] },
@@ -86,6 +112,15 @@ const VIEWS: readonly { readonly name: string; readonly presses: readonly string
   { name: 'notice', presses: ['row:archive.zip'] },
   { name: 'table', presses: ['row:data.csv'] },
   { name: 'help', presses: ['help'] },
+  { name: 'filter', presses: ['filter'], shows: filterKeyOf(0) },
+  {
+    name: 'filtered deep',
+    presses: ['filter'],
+    query: 'bottom',
+    shows: `row:${DEEP.join('/')}/a-file-at-the-bottom-of-it-all.txt`,
+  },
+  { name: 'filtered, no match', presses: ['filter'], query: 'nothing-is-called-this', shows: filterKeyOf(1) },
+  { name: 'filtered preview', presses: ['filter'], query: 'readme', then: ['row:README.md'], shows: filterKeyOf(1) },
 ]
 
 const SEATS = [
@@ -123,6 +158,19 @@ describe('rows fit the body at every width', () => {
           await ui.press({ key })
         }
 
+        if (view.query !== undefined) {
+          await ui.input({ key: filterKeyOf(0), text: view.query })
+        }
+
+        for (const key of view.then ?? []) {
+          await ui.press({ key })
+        }
+
+        // Inline, a picked file stands in for the tree and the filter's row
+        if (view.shows !== undefined && !(seat.placement === 'inline' && view.then !== undefined)) {
+          expect(await ui.find({ key: view.shows }), `${view.name} draws ${view.shows}`).toBeDefined()
+        }
+
         for (const bodyColumns of WIDTHS) {
           await ui.redraw({ ...pane.props, bodyColumns })
 
@@ -141,6 +189,28 @@ describe('rows fit the body at every width', () => {
   }
 })
 
+describe('the width model', () => {
+  const input = (label: string) => ({ type: 'Input', props: { key: 'q', label, onSubmit: () => undefined } })
+
+  test('finds an Input outside a clipped box of fixed width, where a long text wraps', async () => {
+    const row = { type: 'Box', props: { flexDirection: 'row', height: 1 }, children: [input('filter')] }
+
+    expect(overflowsOf(row, 40)).toEqual(['Input q sits outside a clipped box of fixed width'])
+  })
+
+  test('finds a clipped box too narrow for its Input’s label', async () => {
+    const box = (width: number) => ({
+      type: 'Box',
+      props: { width, height: 1, overflow: 'hidden' },
+      children: [input('filter')],
+    })
+
+    // `filter: ` and a cell of field take 9 cells
+    expect(overflowsOf(box(9), 40)).toEqual([])
+    expect(overflowsOf(box(8), 40)).toEqual(["Input q needs 9 cells of its box's 8"])
+  })
+})
+
 describe('a narrow header', () => {
   test('keeps every key working with its labels hidden', async ($, on) => {
     stubProject(on)
@@ -155,15 +225,15 @@ describe('a narrow header', () => {
       props: {
         title: 'Explorer',
         isFocused: true,
-        bodyColumns: 24,
+        bodyColumns: 26,
         placement: 'dock',
         scroll: { offset: 0, bodyRows: 30 },
         view: {},
       },
     })
 
-    // At 24 columns the header draws `e c r  h: help`: e is a hidden Button
-    expect(await ui.find({ type: 'Text', text: 'e c r' })).toBeDefined()
+    // At 26 columns the header draws `e c r f  h: help`: e is a hidden Button
+    expect(await ui.find({ type: 'Text', text: 'e c r f' })).toBeDefined()
     expect(await ui.find({ key: 'help' })).toMatchObject({ props: { label: 'help' } })
 
     await ui.press({ key: 'expand-level' })

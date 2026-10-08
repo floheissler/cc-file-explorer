@@ -23,7 +23,26 @@ type Node = RenderNode | ElementData
  * Elements whose content wraps or scrolls within a fixed-height clipped
  * region by design, so their width is the region's, not their text's.
  */
-const FLOWING = new Set(['Code', 'Markdown', 'Input'])
+const FLOWING = new Set(['Code', 'Markdown'])
+
+/**
+ * The cells an Input takes at the least: its label as the terminal draws
+ * it, `label: `, and a cell of field. In a box of fixed width Claude Code
+ * fits the field to the box, cutting the text; outside one, a long text
+ * wraps over the rows below (checked on 2.1.294).
+ */
+const inputFloorOf = (props: Readonly<Record<string, unknown>>) => {
+  const label = typeof props.label === 'string' && props.label !== '' ? `${props.label}: ` : ''
+
+  return cellWidth(label) + 1
+}
+
+/**
+ * Whether a Box clips its content to a fixed size: an Input inside one is
+ * fitted to its width.
+ */
+const isFixedClip = (props: Readonly<Record<string, unknown>>) =>
+  props.overflow === 'hidden' && typeof props.height === 'number' && typeof props.width === 'number'
 
 const textOf = (node: Node): string =>
   typeof node === 'string' ? node : ((node as ElementData).children ?? []).map(textOf).join('')
@@ -34,8 +53,9 @@ const isFlowing = (element: ElementData) =>
 /**
  * The cells an element takes laid out at its natural width: a Text its
  * widest line, a plain Button `k: label` (or its label), another Button
- * `[ label ]`, a row Box its children and the gaps between them, a column
- * Box its widest child; a hidden Box nothing.
+ * `[ label ]`, an Input its label and a cell, a Box of fixed width that
+ * width, a row Box its children and the gaps between them, a column Box
+ * its widest child; a hidden Box nothing.
  *
  * @param node the element
  * @returns its width in cells
@@ -65,9 +85,15 @@ export function naturalWidthOf(node: Node): number {
 
       return cellWidth(`[ ${label} ]`)
     }
+    case 'Input':
+      return inputFloorOf(props)
     case 'Box': {
       if (props.display === 'none') {
         return 0
+      }
+
+      if (typeof props.width === 'number') {
+        return props.width
       }
 
       const children = element.children ?? []
@@ -88,8 +114,9 @@ export function naturalWidthOf(node: Node): number {
 }
 
 /**
- * What in a drawn tree is wider than the body, and any content that wraps
- * or scrolls outside a fixed-height clipped region.
+ * What in a drawn tree is wider than the body, any content that wraps or
+ * scrolls outside a fixed-height clipped region, and any Input outside a
+ * clipped box of fixed width or too narrow for its label.
  *
  * @param tree what the render hook drew
  * @param columns the body's width in cells
@@ -105,7 +132,12 @@ export function overflowsOf(tree: Node, columns: number): string[] {
     return `${element.type}${typeof key === 'string' ? ` ${key}` : ''}${text === '' ? '' : ` "${text}"`}`
   }
 
-  const visit = (node: Node, isClipped: boolean) => {
+  /**
+   * @param isClipped whether a fixed-height clipped region holds the node
+   * @param fixedWidth the width of the clipped box of fixed size nearest
+   *   above the node, null for none
+   */
+  const visit = (node: Node, isClipped: boolean, fixedWidth: number | null) => {
     if (typeof node === 'string') {
       return
     }
@@ -121,6 +153,14 @@ export function overflowsOf(tree: Node, columns: number): string[] {
       found.push(`${describe(element)} flows outside a clipped region`)
     }
 
+    if (element.type === 'Input') {
+      if (fixedWidth === null) {
+        found.push(`${describe(element)} sits outside a clipped box of fixed width`)
+      } else if (inputFloorOf(props) > fixedWidth) {
+        found.push(`${describe(element)} needs ${inputFloorOf(props)} cells of its box's ${fixedWidth}`)
+      }
+    }
+
     const width = naturalWidthOf(element)
 
     if (width > columns && !(element.type === 'Box' && props.width === columns)) {
@@ -128,13 +168,14 @@ export function overflowsOf(tree: Node, columns: number): string[] {
     }
 
     const clips = isClipped || (props.overflow === 'hidden' && typeof props.height === 'number')
+    const fixes = element.type === 'Box' && isFixedClip(props) ? Number(props.width) : fixedWidth
 
     for (const child of element.children ?? []) {
-      visit(child, clips)
+      visit(child, clips, fixes)
     }
   }
 
-  visit(tree, false)
+  visit(tree, false, null)
 
   return found
 }

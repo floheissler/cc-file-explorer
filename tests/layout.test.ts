@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { escapeStepOf, inlineLayoutOf, inlineViewOf } from '../hooks/layout'
+import { escapeStepOf, inlineLayoutOf, inlineViewOf, paneLayoutOf } from '../hooks/layout'
 
 describe('inlineViewOf', () => {
   test('shows the help while asked for, else a picked and shown file, else the tree', async () => {
@@ -43,7 +43,36 @@ describe('inlineLayoutOf', () => {
   })
 })
 
+describe('the filter’s row', () => {
+  test('sits between the header and the tree, docked', async () => {
+    expect(paneLayoutOf(30, false, true)).toMatchObject({ treeRow: 2, treeRows: 28, previewRows: 0 })
+
+    const withPreview = paneLayoutOf(30, true, true)
+
+    expect(withPreview.treeRow).toBe(2)
+    expect(withPreview.treeRow + withPreview.treeRows + 3 + withPreview.previewRows).toBe(30)
+  })
+
+  test('sits over an inline tree only', async () => {
+    expect(inlineLayoutOf(12, 'tree', 3, true)).toEqual({
+      bodyRows: 5,
+      treeRow: 2,
+      treeRows: 3,
+      previewRow: 5,
+      previewRows: 0,
+    })
+    expect(inlineLayoutOf(12, 'tree', 50, true)).toMatchObject({ bodyRows: 12, treeRows: 10 })
+    expect(inlineLayoutOf(12, 'file', 5, true)).toMatchObject({ bodyRows: 6, previewRow: 1, previewRows: 5 })
+  })
+})
+
 describe('escapeStepOf', () => {
+  test('steps from a filtered tree to the whole tree before closing', async () => {
+    expect(escapeStepOf('tree', true)).toBe('unfilter')
+    expect(escapeStepOf('file', true)).toBe('tree')
+    expect(escapeStepOf('help', true)).toBe('tree')
+  })
+
   test('steps back from the file and the help to the tree, and closes from the tree', async () => {
     expect(escapeStepOf('file')).toBe('tree')
     expect(escapeStepOf('help')).toBe('tree')

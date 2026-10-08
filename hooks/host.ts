@@ -1,7 +1,10 @@
 import type {
   FsEntry,
   FsStat,
+  ProcessRunInit,
+  ProcessRunResult,
   Timer,
+  UiFocusResult,
   UiPane,
 } from 'claude-code'
 
@@ -26,6 +29,7 @@ export type PaneState = {
   readonly previewTop: StateCell<number>
   readonly markdownMode: StateCell<MarkdownMode>
   readonly helpShown: StateCell<boolean>
+  readonly filter: StateCell<string | null>
 }
 
 /**
@@ -39,6 +43,10 @@ export type Host = {
    * The session's project root, absolute: the tree's root.
    */
   readonly root: () => Promise<string>
+  /**
+   * Runs a program (git) with no shell: the filter's file list.
+   */
+  readonly run: (argv: readonly string[], init: ProcessRunInit) => Promise<ProcessRunResult>
   readonly list: (path: string) => Promise<readonly FsEntry[]>
   readonly stat: (path: string) => Promise<FsStat>
   readonly read: (path: string) => Promise<string>
@@ -50,6 +58,11 @@ export type Host = {
    * Asks for the pane to be drawn again from what the module holds.
    */
   readonly invalidate: () => void
+  /**
+   * Moves the pane's focus ring onto an element it draws, waiting a while
+   * for one not drawn yet; denied while the pane does not hold the keys.
+   */
+  readonly focus: (key: string) => Promise<UiFocusResult>
   readonly after: (ms: number, fn: () => void) => Timer
   /**
    * Says something briefly without a turn: a level step that stopped early.

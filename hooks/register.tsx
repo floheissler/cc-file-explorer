@@ -1,6 +1,20 @@
 import { atom, read, update } from 'claude-code'
 import type { CommandPresentation, EngineInterface, Register, Timer, ToolCallResult } from 'claude-code'
 
+import {
+  filteredListingOf,
+  filteredTreeOf,
+  filterIndexOf,
+  filterStatusOf,
+  filterViewOf,
+  firstMatchOf,
+  foldedSetOf,
+  openedOf,
+  queryOf,
+  searchingRows,
+  type FilterIndex,
+  type FilterView,
+} from './filter'
 import { focusOrderOf, focusStepOf, type FocusOrder } from './focus'
 import type { Host } from './host'
 import {
@@ -12,11 +26,12 @@ import {
   type PaneLayout,
 } from './layout'
 import Limits from './limits'
-import { collapseOneLevel, expandOneLevel, expandToDepth } from './levels'
+import { collapseOneLevel, expandOneLevel, expandToDepth, type ListingOf, type ReadDirs } from './levels'
 import {
   fileStampOf,
   openListing,
   readDirs,
+  readFileList,
   readPreview,
   readTree,
   stampDirs,
@@ -24,13 +39,14 @@ import {
 } from './listing'
 import {
   COMMAND_DESCRIPTION,
+  filterKeyOf,
   FULLSCREEN_TIP_TEXT,
   PANE_TITLE,
   ROW_KEY_PREFIX,
   TIP_SHOWN_KEY,
   WIDEN_TIP_TEXT,
 } from './names'
-import { rootLabelOf } from './paths'
+import { ancestorsOf, foldKey, rootLabelOf, styleOf } from './paths'
 import { changedDirsOf, mayHaveWritten, pollBatchOf, shownDirsOf } from './poll'
 import { maxPreviewTop, previewHeightOf, sourceColumnsOf, type Preview } from './preview'
 import { messageOf } from './text'
@@ -41,9 +57,10 @@ import {
   maxTreeTop,
   topRevealing,
   treeWindowOf,
+  type PathSet,
   type TreeRow,
 } from './tree'
-import { helpHeightOf, paneView, type PaneActions, type Seat } from './view'
+import { helpHeightOf, paneView, type FilterModel, type PaneActions, type Seat } from './view'
 
 /**
  * The pane's id and the command that toggles it. The hooks' matchers spell
@@ -68,6 +85,7 @@ const TREE_TOP = atom({ plugin: 'file-explorer', key: 'treeTop' } as const, 0)
 const PREVIEW_TOP = atom({ plugin: 'file-explorer', key: 'previewTop' } as const, 0)
 const MARKDOWN_MODE = atom({ plugin: 'file-explorer', key: 'markdownMode' } as const, 'rendered')
 const HELP_SHOWN = atom({ plugin: 'file-explorer', key: 'helpShown' } as const, false)
+const FILTER = atom({ plugin: 'file-explorer', key: 'filter' } as const, null)
 
 /**
  * What the last drawing laid out: the scroll and focus hooks steer by it.
@@ -79,6 +97,22 @@ type Drawn = {
    * The cells across a row.
    */
   readonly columns: number
+  /**
+   * Whether the filter's row sat over the tree.
+   */
+  readonly hasFilter: boolean
+}
+
+/**
+ * The tree a level step works on, the one the pane shows: its folders as
+ * drawn, which are open, how to read more, and where the step's result is
+ * kept.
+ */
+type ShownFolders = {
+  readonly listingOf: ListingOf
+  readonly expanded: PathSet
+  readonly read: ReadDirs
+  readonly open: (paths: readonly string[]) => Promise<void>
 }
 
 /**
@@ -91,11 +125,13 @@ type Drawn = {
 function hostOf($: EngineInterface): Host {
   return {
     root: () => $.session.root(),
+    run: (argv, init) => $.process.run(argv, init),
     list: path => $.fs.list(path),
     stat: path => $.fs.stat(path),
     read: path => $.fs.read(path),
     panes: () => $.ui.panes(),
     invalidate: () => $.ui.invalidate('ui.render'),
+    focus: key => $.ui.focus({ requestId: PANE_ID, key }),
     after: (ms, fn) => $.clock.after(ms, fn),
     toast: text => $.ui.toast(text),
     store: {
@@ -137,6 +173,12 @@ function hostOf($: EngineInterface): Host {
         get: () => read($, HELP_SHOWN),
         set: async fn => {
           await update($, HELP_SHOWN, fn)
+        },
+      },
+      filter: {
+        get: () => read($, FILTER),
+        set: async fn => {
+          await update($, FILTER, fn)
         },
       },
     },
@@ -217,6 +259,50 @@ export const register: Register = on => {
   const polling = { isOn: false, generation: 0, cursor: 0, timer: null as Timer | null }
 
   /**
+   * The filter, beyond its query in the session state:
+   * - the project's files as read for it, as an index, read once per
+   *   filter and again after a refresh (`generation` drops a read overtaken
+   *   by one);
+   * - the text in its field, ahead of the query while typing pauses;
+   * - how many times Enter was pressed in the field, which keys the field;
+   * - the last query's matches, and the folders the filtered tree has open
+   *   for them;
+   * - where the whole tree's window stood when the filter opened.
+   */
+  const filtering = {
+    index: null as FilterIndex | null,
+    load: null as Promise<void> | null,
+    generation: 0,
+    typed: null as string | null,
+    submits: 0,
+    debounce: null as Timer | null,
+    found: null as { readonly index: FilterIndex; readonly text: string; readonly view: FilterView } | null,
+    open: null as { readonly text: string; readonly view: FilterView; readonly folders: Set<string> } | null,
+    treeTopBefore: 0,
+  }
+
+  /**
+   * Drops the filter's file list, so the next drawing that filters reads it
+   * afresh.
+   */
+  const dropFileList = () => {
+    filtering.generation += 1
+    filtering.index = null
+    filtering.load = null
+    filtering.found = null
+  }
+
+  /**
+   * Leaves the filter's own state: the field's text and the open folders.
+   */
+  const leaveFilter = () => {
+    filtering.debounce?.cancel()
+    filtering.debounce = null
+    filtering.typed = null
+    filtering.open = null
+  }
+
+  /**
    * Drops what was read, so the next drawing reads the project afresh.
    */
   const forget = () => {
@@ -228,6 +314,8 @@ export const register: Register = on => {
     drawn = null
     dirLoads.clear()
     polling.cursor = 0
+    dropFileList()
+    leaveFilter()
   }
 
   /**
@@ -252,6 +340,178 @@ export const register: Register = on => {
     })()
 
     return listingLoad
+  }
+
+  /**
+   * Reads the project's file list for the filter anew. The index it had
+   * stays drawn until the new one is in; a read a later one overtook is
+   * dropped.
+   */
+  const loadFilterIndex = (host: Host): Promise<void> => {
+    filtering.generation += 1
+
+    const generation = filtering.generation
+
+    const load: Promise<void> = (async () => {
+      const opened = await ensureListing(host)
+      const index = filterIndexOf(await readFileList(host, opened))
+
+      if (generation === filtering.generation) {
+        filtering.index = index
+        host.invalidate()
+      }
+    })().finally(() => {
+      if (filtering.load === load) {
+        filtering.load = null
+      }
+    })
+
+    filtering.load = load
+
+    return load
+  }
+
+  /**
+   * The filter's index of the project's files, read once.
+   */
+  const ensureFilterIndex = (host: Host): Promise<void> =>
+    filtering.index !== null ? Promise.resolve() : (filtering.load ?? loadFilterIndex(host))
+
+  /**
+   * What a query finds in the index, worked out once per query and index,
+   * as every drawing, focus move and scroll asks again.
+   *
+   * @returns what it found, or null for a blank query
+   */
+  const filterViewFor = (index: FilterIndex, text: string, root: string): FilterView | null => {
+    const query = queryOf(text)
+
+    if (query === null) {
+      return null
+    }
+
+    if (filtering.found?.index !== index || filtering.found.text !== text) {
+      const view = filterViewOf(index, query, Limits.MAX_FILTER_MATCHES, styleOf(root))
+
+      filtering.found = { index, text, view }
+    }
+
+    return filtering.found.view
+  }
+
+  /**
+   * The folders the filtered tree has open, folded keys: every folder that
+   * holds a match, until the person opens or closes some. A new query starts
+   * again from those; the same query over a file list read again keeps the
+   * person's choices and opens the folders of new matches.
+   */
+  const openFoldersOf = (view: FilterView, text: string): Set<string> => {
+    const open = filtering.open
+
+    if (open !== null && open.text === text && open.view === view) {
+      return open.folders
+    }
+
+    const folders =
+      open === null || open.text !== text
+        ? openedOf(view)
+        : new Set([...open.folders, ...[...view.ancestors].filter(dir => !open.view.ancestors.has(dir))])
+
+    filtering.open = { text, view, folders }
+
+    return folders
+  }
+
+  /**
+   * The query the tree is filtered by, what it found, and the folders as
+   * the filtered tree draws them; null while the tree is not filtered, or
+   * its file list is still being read.
+   */
+  const filterNow = async (host: Host, opened: Listing) => {
+    const text = await host.state.filter.get()
+
+    if (text === null || filtering.index === null) {
+      return null
+    }
+
+    const view = filterViewFor(filtering.index, text, opened.root)
+
+    return view === null
+      ? null
+      : { text, view, listingOf: filteredListingOf(dir => opened.dirs.get(dir), view) }
+  }
+
+  /**
+   * The tree as the pane shows it: the whole tree, or while the filter holds
+   * a query, the tree of what it found, a note while its files are read.
+   *
+   * @param current the folders as read
+   * @param expanded the whole tree's open folders
+   * @param text the filter's query, null while it is not shown
+   * @param onUnread told each open folder not read yet
+   * @returns the rows, and what the query found
+   */
+  const shownTreeOf = (
+    current: Listing,
+    expanded: readonly string[],
+    text: string | null,
+    onUnread: (dir: string) => void = () => undefined,
+  ): { readonly rows: TreeRow[]; readonly view: FilterView | null } => {
+    const listingOf: ListingOf = dir => {
+      const found = current.dirs.get(dir)
+
+      if (found === undefined) {
+        onUnread(dir)
+      }
+
+      return found
+    }
+
+    if (text === null || queryOf(text) === null) {
+      return { rows: flattenTree(listingOf, new Set(expanded)), view: null }
+    }
+
+    const view = filtering.index === null ? null : filterViewFor(filtering.index, text, current.root)
+
+    return view === null
+      ? { rows: searchingRows(), view: null }
+      : { rows: filteredTreeOf(listingOf, view, openFoldersOf(view, text)), view }
+  }
+
+  /**
+   * The tree a level step works on: the filtered tree while the filter holds
+   * a query, its open folders kept here; else the whole tree, its open
+   * folders kept in the session state.
+   */
+  const shownFoldersOf = async (host: Host): Promise<ShownFolders> => {
+    const opened = await ensureListing(host)
+    const read: ReadDirs = dirs => readDirs(host, opened, dirs)
+    const filter = await filterNow(host, opened)
+
+    if (filter === null) {
+      return {
+        listingOf: dir => opened.dirs.get(dir),
+        expanded: new Set(await host.state.expanded.get()),
+        read,
+        open: async paths => {
+          await host.state.expanded.set(() => [...paths])
+        },
+      }
+    }
+
+    const { text, view, listingOf } = filter
+    const folders = openFoldersOf(view, text)
+
+    return {
+      listingOf,
+      expanded: foldedSetOf(folders, view.style),
+      read,
+      open: async paths => {
+        folders.clear()
+        paths.forEach(path => folders.add(foldKey(path, view.style)))
+        host.invalidate()
+      },
+    }
   }
 
   /**
@@ -315,7 +575,7 @@ export const register: Register = on => {
       return
     }
 
-    const { treeRows } = paneLayoutOf(layout.bodyRows, hasPreview)
+    const { treeRows } = paneLayoutOf(layout.bodyRows, hasPreview, drawn.hasFilter)
 
     await host.state.treeTop.set(top => topRevealing(index, top, rows.length, treeRows))
   }
@@ -350,8 +610,9 @@ export const register: Register = on => {
   }
 
   /**
-   * Re-reads the tree's open folders and the previewed file, and redraws.
-   * A closed pane only forgets what it read: it reads afresh on opening.
+   * Re-reads the tree's open folders, the previewed file and, the next time
+   * the tree is filtered, the project's file list; and redraws. A closed
+   * pane only forgets what it read: it reads afresh on opening.
    */
   const refresh = async (host: Host) => {
     const isOpen = (await host.panes()).some(pane => pane.id === PANE_ID)
@@ -360,6 +621,12 @@ export const register: Register = on => {
       forget()
 
       return
+    }
+
+    const isFiltering = queryOf((await host.state.filter.get()) ?? '') !== null
+
+    if (!isFiltering) {
+      dropFileList()
     }
 
     const opened = await openListing(host)
@@ -373,6 +640,12 @@ export const register: Register = on => {
     }
 
     listing = opened
+
+    // A filtered tree keeps its matches drawn while the list is read again,
+    // into the listing just read
+    if (isFiltering) {
+      void loadFilterIndex(host).catch(() => undefined)
+    }
 
     const selected = await host.state.selected.get()
 
@@ -409,12 +682,15 @@ export const register: Register = on => {
   /**
    * One poll: the shown folders' times, a bounded batch taking turns past
    * the cap; the changed ones listed again, a bounded few; and the previewed
-   * file. A poll never writes state.
+   * file. While the tree is filtered, the folders the filtered tree shows,
+   * and a change among them reads the file list again, so a new match
+   * appears. A poll never writes state.
    *
    * @returns whether anything drawn changed
    */
   const pollOnce = async (host: Host, current: Listing): Promise<boolean> => {
-    const rows = flattenTree(dir => current.dirs.get(dir), new Set(await host.state.expanded.get()))
+    const text = await host.state.filter.get()
+    const { rows, view } = shownTreeOf(current, await host.state.expanded.get(), text)
     const shown = shownDirsOf(rows).filter(dir => !dirLoads.has(dir))
     const { batch, cursor } = pollBatchOf(shown, polling.cursor, Limits.MAX_POLL_STATS)
 
@@ -424,6 +700,10 @@ export const register: Register = on => {
     const changed = changedDirsOf(batch, current.stamps, now).slice(0, Limits.MAX_POLL_RELISTS)
 
     await readDirs(host, current, changed)
+
+    if (view !== null && changed.length > 0 && filtering.load === null) {
+      void loadFilterIndex(host).catch(() => undefined)
+    }
 
     const isPreviewRead = await pollPreview(host, current)
 
@@ -543,10 +823,116 @@ export const register: Register = on => {
   const cappedText = (key: string) =>
     `Opened ${Limits.MAX_LEVEL_FOLDERS} folders, the most one step opens; press ${key} again for more`
 
+  /**
+   * Moves the focus ring onto an element of the pane. The plugin's own move
+   * raises no `ui.focus` of its own hooks, so it notes where the ring went.
+   */
+  const focusOn = async (host: Host, key: string) => {
+    const moved = await host.focus(key).catch(() => ({ deny: 'the pane could not take the focus' }))
+
+    if (moved.deny === undefined) {
+      lastFocused = key
+    }
+  }
+
+  const focusField = (host: Host) => focusOn(host, filterKeyOf(filtering.submits))
+
+  /**
+   * Makes the tree show a query's matches: the filter's query in the session
+   * state, and the tree's window at its top for a new query, or where the
+   * whole tree's stood for a blank one. A filter closed meanwhile stays shut.
+   */
+  const applyFilter = async (host: Host, text: string) => {
+    const before = await host.state.filter.get()
+
+    if (before === null || before === text) {
+      return
+    }
+
+    await host.state.filter.set(query => (query === null ? null : text))
+    await host.state.treeTop.set(() => (queryOf(text) === null ? filtering.treeTopBefore : 0))
+  }
+
+  /**
+   * The filtered tree with every folder it opens read, level by level.
+   *
+   * @returns its rows and what the query found, or null for a blank query
+   */
+  const readFilteredTree = async (host: Host, text: string) => {
+    await ensureFilterIndex(host)
+
+    const opened = await ensureListing(host)
+    let before = ''
+
+    for (;;) {
+      const unread = new Set<string>()
+      const shown = shownTreeOf(opened, [], text, dir => unread.add(dir))
+      const reading = [...unread].join('\0')
+
+      if (shown.view === null) {
+        return null
+      }
+
+      // A folder that cannot be read is read as its error, so each pass
+      // reads deeper; one that reads nothing new ends it
+      if (unread.size === 0 || reading === before) {
+        return { rows: shown.rows, view: shown.view }
+      }
+
+      before = reading
+      await readDirs(host, opened, [...unread])
+    }
+  }
+
+  /**
+   * Shows a file in the whole tree: its folders open, the tree's window
+   * moved to it in the dock, and the focus ring on it.
+   */
+  const revealInTree = async (host: Host, path: string) => {
+    const opened = await ensureListing(host)
+    const folders = ancestorsOf(path)
+
+    await readDirs(host, opened, folders.filter(dir => !opened.dirs.has(dir)))
+    await host.state.expanded.set(open => [...open, ...folders.filter(dir => !open.includes(dir))])
+
+    const rows = flattenTree(dir => opened.dirs.get(dir), new Set(await host.state.expanded.get()))
+    const index = rows.findIndex(row => row.type === 'entry' && row.path === path)
+
+    if (index >= 0 && drawn !== null && seat.placement === 'dock') {
+      const { treeRows } = paneLayoutOf(drawn.layout.bodyRows, true)
+
+      await host.state.treeTop.set(() => topRevealing(index, filtering.treeTopBefore, rows.length, treeRows))
+    }
+
+    await focusOn(host, `${ROW_KEY_PREFIX}${path}`)
+  }
+
+  /**
+   * Closes the filter: the whole tree shows again, the file picked while
+   * filtering shown in it, else where its window stood.
+   */
+  const closeFilter = async (host: Host) => {
+    leaveFilter()
+    await host.state.filter.set(() => null)
+
+    const selected = await host.state.selected.get()
+
+    if (selected === null) {
+      await host.state.treeTop.set(() => filtering.treeTopBefore)
+    } else {
+      await revealInTree(host, selected)
+    }
+  }
+
   const actionsOf = (host: Host): PaneActions => ({
     toggleDir: async path => {
       const opened = await ensureListing(host)
-      const isOpen = (await host.state.expanded.get()).includes(path)
+      const filter = await filterNow(host, opened)
+      const folders = filter === null ? null : openFoldersOf(filter.view, filter.text)
+      const folded = filter === null ? path : foldKey(path, filter.view.style)
+
+      const isOpen =
+        folders === null ? (await host.state.expanded.get()).includes(path) : folders.has(folded)
 
       // A folder read before is read again when it changed while closed,
       // as the polls only look at open folders
@@ -555,6 +941,20 @@ export const register: Register = on => {
 
       if (!isOpen && (!opened.dirs.has(path) || (await isStale()))) {
         await readDirs(host, opened, [path])
+      }
+
+      // The filtered tree keeps its open folders here, apart from the whole
+      // tree's, which it leaves as they were
+      if (folders !== null) {
+        if (isOpen) {
+          folders.delete(folded)
+        } else {
+          folders.add(folded)
+        }
+
+        host.invalidate()
+
+        return
       }
 
       await host.state.expanded.set(paths =>
@@ -591,17 +991,13 @@ export const register: Register = on => {
 
     scrollPreview: lines => scrollPreviewBy(host, lines * Limits.KEY_ROWS),
 
+    // The level steps work on the tree in view, filtered or whole
     expandLevel: () =>
       runLevelStep(async () => {
-        const opened = await ensureListing(host)
-        const step = await expandOneLevel(
-          dir => opened.dirs.get(dir),
-          new Set(await host.state.expanded.get()),
-          dirs => readDirs(host, opened, dirs),
-          Limits.MAX_LEVEL_FOLDERS,
-        )
+        const shown = await shownFoldersOf(host)
+        const step = await expandOneLevel(shown.listingOf, shown.expanded, shown.read, Limits.MAX_LEVEL_FOLDERS)
 
-        await host.state.expanded.set(() => step.expanded)
+        await shown.open(step.expanded)
 
         if (step.isCapped) {
           host.toast(cappedText('e'))
@@ -610,26 +1006,17 @@ export const register: Register = on => {
 
     collapseLevel: () =>
       runLevelStep(async () => {
-        const opened = await ensureListing(host)
-        const open = collapseOneLevel(
-          dir => opened.dirs.get(dir),
-          new Set(await host.state.expanded.get()),
-        )
+        const shown = await shownFoldersOf(host)
 
-        await host.state.expanded.set(() => open)
+        await shown.open(collapseOneLevel(shown.listingOf, shown.expanded))
       }),
 
     showDepth: levels =>
       runLevelStep(async () => {
-        const opened = await ensureListing(host)
-        const step = await expandToDepth(
-          dir => opened.dirs.get(dir),
-          levels,
-          dirs => readDirs(host, opened, dirs),
-          Limits.MAX_LEVEL_FOLDERS,
-        )
+        const shown = await shownFoldersOf(host)
+        const step = await expandToDepth(shown.listingOf, levels, shown.read, Limits.MAX_LEVEL_FOLDERS)
 
-        await host.state.expanded.set(() => step.expanded)
+        await shown.open(step.expanded)
         await host.state.treeTop.set(() => 0)
 
         if (step.isCapped) {
@@ -651,6 +1038,73 @@ export const register: Register = on => {
     },
 
     refresh: () => refresh(host),
+
+    toggleFilter: async () => {
+      if ((await host.state.filter.get()) !== null) {
+        await closeFilter(host)
+
+        return
+      }
+
+      // Each filter reads the project's files afresh, from the moment it shows
+      leaveFilter()
+      filtering.typed = ''
+      filtering.treeTopBefore = await host.state.treeTop.get()
+      dropFileList()
+      void ensureFilterIndex(host).catch(() => undefined)
+
+      await host.state.helpShown.set(() => false)
+      await host.state.filter.set(() => '')
+      await focusField(host)
+    },
+
+    typeFilter: async text => {
+      filtering.typed = text
+      filtering.debounce?.cancel()
+      filtering.debounce = host.after(Limits.FILTER_DEBOUNCE_MS, () => {
+        filtering.debounce = null
+        void applyFilter(host, text).catch(() => undefined)
+      })
+    },
+
+    submitFilter: async text => {
+      filtering.debounce?.cancel()
+      filtering.debounce = null
+      filtering.typed = text
+
+      // Claude Code empties the field on Enter: the next one is drawn
+      // holding the query
+      filtering.submits += 1
+
+      if (queryOf(text) === null) {
+        await closeFilter(host)
+
+        return
+      }
+
+      await applyFilter(host, text)
+
+      const shown = await readFilteredTree(host, text)
+      const first = shown === null ? null : firstMatchOf(shown.rows, shown.view)
+
+      if (shown === null || first === null) {
+        await focusField(host)
+
+        return
+      }
+
+      // The plugin's own focus move raises none of its focus hooks: the
+      // window is moved to the match here
+      const index = shown.rows.findIndex(row => row.type === 'entry' && row.path === first)
+
+      if (drawn !== null && seat.placement === 'dock') {
+        const { treeRows } = paneLayoutOf(drawn.layout.bodyRows, drawn.layout.previewRows > 0, true)
+
+        await host.state.treeTop.set(top => topRevealing(index, top, shown.rows.length, treeRows))
+      }
+
+      await focusOn(host, `${ROW_KEY_PREFIX}${first}`)
+    },
   })
 
   on('session.start', async ($, e, next) => {
@@ -692,11 +1146,13 @@ export const register: Register = on => {
       return {}
     }
 
-    // A pane opens on the tree: a file shown inline, or the help, is left
+    // A pane opens on the whole tree: a file shown inline, the help, or a
+    // filter is left
     forget()
     lastFocused = undefined
     isFileShown = false
     await update($, HELP_SHOWN, () => false)
+    await update($, FILTER, () => null)
     await ensureListing(hostOf($)).catch(() => undefined)
 
     await $.ui.open(paneArgsOf(e.presentation?.isFullscreen === false))
@@ -713,15 +1169,16 @@ export const register: Register = on => {
     }
 
     const host = hostOf($)
-    const { Box, Text, Button, Code, Markdown } = $.ui.resolve(e)
+    const { Box, Text, Button, Code, Markdown, Input } = $.ui.resolve(e)
 
-    const [expanded, selected, treeTop, previewTop, markdownMode, helpShown] = await Promise.all([
+    const [expanded, selected, treeTop, previewTop, markdownMode, helpShown, filterText] = await Promise.all([
       read($, EXPANDED),
       read($, SELECTED),
       read($, TREE_TOP),
       read($, PREVIEW_TOP),
       read($, MARKDOWN_MODE),
       read($, HELP_SHOWN),
+      read($, FILTER),
     ])
 
     const current = listing
@@ -733,20 +1190,19 @@ export const register: Register = on => {
       )
     }
 
+    // A query filters the tree once the project's file list is read
+    if (queryOf(filterText ?? '') !== null && filtering.index === null) {
+      void ensureFilterIndex(host).catch(() => undefined)
+    }
+
     const unread: string[] = []
 
-    const rows =
+    const shown =
       current === null
-        ? flattenTree(() => undefined, new Set())
-        : flattenTree(dir => {
-            const found = current.dirs.get(dir)
+        ? { rows: flattenTree(() => undefined, new Set()), view: null }
+        : shownTreeOf(current, expanded, filterText, dir => unread.push(dir))
 
-            if (found === undefined) {
-              unread.push(dir)
-            }
-
-            return found
-          }, new Set(expanded))
+    const { rows } = shown
 
     if (current !== null && unread.length > 0) {
       void loadDirs(host, current, unread).catch(() => undefined)
@@ -774,9 +1230,13 @@ export const register: Register = on => {
     const shownPreview = isPreviewStale ? null : preview
     const inlineView = seat.placement === 'inline' ? inlineViewOf({ helpShown, isFileShown, selected }) : null
 
+    // The filter's row sits over the tree, whole or filtered; the help and an
+    // inline file view stand in for both
+    const hasFilter = filterText !== null && !helpShown && inlineView !== 'file'
+
     const layout =
       inlineView === null
-        ? paneLayoutOf(e.props.scroll.bodyRows, selected !== null)
+        ? paneLayoutOf(e.props.scroll.bodyRows, selected !== null, hasFilter)
         : inlineLayoutOf(
             e.props.scroll.bodyRows,
             inlineView,
@@ -785,16 +1245,28 @@ export const register: Register = on => {
               : inlineView === 'file'
                 ? previewHeightOf(shownPreview)
                 : helpHeightOf(seat, columns),
+            hasFilter,
           )
 
     const window = treeWindowOf(rows.length, treeTop, layout.treeRows)
 
     // The help view stands in for the tree: the scroll and focus hooks then
     // have no rows to steer
-    drawn = helpShown ? null : { rows, layout, columns }
+    drawn = helpShown ? null : { rows, layout, columns, hasFilter }
+
+    // The field holds what was typed, ahead of the query while typing pauses
+    const filter: FilterModel | null =
+      filterText === null
+        ? null
+        : {
+            key: filterKeyOf(filtering.submits),
+            value: filtering.typed ?? filterText,
+            status: queryOf(filterText) === null ? '' : filterStatusOf(shown.view),
+            isBlank: queryOf(filtering.typed ?? filterText) === null,
+          }
 
     const tree = paneView(
-      { Box, Text, Button, Code, Markdown },
+      { Box, Text, Button, Code, Markdown, Input },
       actionsOf(host),
       columns,
       {
@@ -809,6 +1281,7 @@ export const register: Register = on => {
         previewTop,
         markdownMode,
         helpShown,
+        filter,
       },
     )
 
@@ -904,10 +1377,12 @@ export const register: Register = on => {
 
   /**
    * The pane closing, by `/tree`, its close mark or a key: the polls stop.
-   * Inline, the person's close steps back from the file or the help to the
-   * tree first, as Claude Code's own dialogs do; the pane opens again with
-   * the keyboard, and the picked file's row takes the focus ring. No
-   * `.catch`: a throw of `next` passes on as it came, never run twice.
+   * Inline, the person's close steps back first, as Claude Code's own
+   * dialogs do: from the file or the help to the tree, from a filtered tree
+   * (Esc in the filter's field, under the classic renderer) to the whole
+   * tree; the pane opens again with the keyboard, and the picked file's row
+   * takes the focus ring. No `.catch`: a throw of `next` passes on as it
+   * came, never run twice.
    */
   on('ui.close', { id: 'file-explorer' }, async ($, e, next) => {
     if (e.origin.kind === 'person' && seat.placement === 'inline') {
@@ -917,13 +1392,19 @@ export const register: Register = on => {
         selected: await read($, SELECTED),
       })
 
-      if (escapeStepOf(view) !== null) {
+      const step = escapeStepOf(view, (await read($, FILTER)) !== null)
+
+      if (step !== null) {
+        if (step === 'unfilter') {
+          await closeFilter(hostOf($)).catch(() => undefined)
+        }
+
         isFileShown = false
         await update($, HELP_SHOWN, () => false)
         hostOf($).invalidate()
         void $.ui.open(paneArgsOf(seat.isClassic)).catch(() => undefined)
 
-        return { deny: 'back to the tree' }
+        return { deny: step === 'unfilter' ? 'back to the whole tree' : 'back to the tree' }
       }
     }
 

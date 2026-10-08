@@ -15,7 +15,10 @@ entry with `"source": "./"`). README.md has the user-facing behavior.
 - `hooks/register.tsx`: the hooks module and the only file that touches `$`.
 - `hooks/host.ts`: the `Host` record the rest of the code takes instead of `$`.
 - `hooks/listing.ts`: reads folders and files through `Host` (`$.fs`).
-  Everything but `.git` is listed, git-ignored entries included.
+  Everything but `.git` is listed, git-ignored entries included. Also the
+  filter's file list: `git ls-files` in a work tree, else a bounded walk.
+- `hooks/filter.ts`: pure logic of the filter (`f`): reading git's output,
+  matching a query, and the filtered tree drawn from the real listings.
 - `hooks/paths.ts`: the one place that turns tree keys into native paths.
 - `hooks/poll.ts`: pure logic of the checks for outside changes (which
   folders, in what batches, which changed) and of which tool calls may have
@@ -29,7 +32,8 @@ entry with `"source": "./"`). README.md has the user-facing behavior.
 - `hooks/view.tsx`: draws the pane from a `PaneModel`.
 - `types/index.d.ts`: the `$.state` contract (`PluginState['file-explorer']`).
 - `tests/`: `claude plugin test` suites; `pane.test.ts` mounts the pane on the
-  terminal and desktop surfaces with a stubbed file system.
+  terminal and desktop surfaces with a stubbed file system, and
+  `filtering.test.ts` the filter with git stubbed too.
 - `ROADMAP.md` (gitignored, local): the working plan toward a publishable
   release, a checklist with context for each item. Start there when asked to
   work on the next item.
@@ -66,10 +70,37 @@ the module otherwise:
 - Every open goes through `paneArgsOf` (focus, `rows`, `closeOnEscape` under
   the classic renderer), as each `$.ui.open` sets them all anew.
 - Inline, a person's close (Esc, the close mark, Ctrl+X X) steps back first:
-  the `ui.close` hook answers `{ deny }`, shows the tree, and opens the pane
-  again; the picked file's row has `autoFocus`, so the ring lands on it.
-  The test kit cannot raise a person's close (`$.ui.close` is undefined
-  there), so `escapeStepOf` carries the decision and is tested pure.
+  the `ui.close` hook answers `{ deny }`, shows the tree (from a filtered
+  tree, the whole tree), and opens the pane again; the picked file's row has
+  `autoFocus`, so the ring lands on it. The test kit cannot raise a person's
+  close (`$.ui.close` is undefined there), so `escapeStepOf` carries the
+  decision and is tested pure.
+- The filter (`f`): its query is `$.state` (`filter`, null while hidden);
+  its file list, matches and the filtered tree's open folders are the
+  module's. The filtered tree is drawn from the real listings
+  (`filteredListingOf`): the list only picks which entries show, compared
+  folded (`foldKey`), so rows keep `$.fs.list`'s spelling and keys. The
+  level keys and folder presses work on the tree in view (`shownFoldersOf`),
+  and leave the whole tree's open folders as they were.
+- The filter's list comes from `git ls-files` (the only process the mod
+  starts), run with `GIT_OPTIONAL_LOCKS=0`, `LC_ALL=C`, `-z` and a timeout;
+  its paths are relative to the root and `/`-separated on every platform.
+  Where git lists nothing (no work tree, or a root inside an ignored
+  folder), a bounded walk of the folders stands in.
+- An `Input` sits in a clipped box of exact `width` and `height`: there
+  Claude Code fits the field to the box, where at its natural width a long
+  text wraps over the rows below (checked live on 2.1.294). `tests/drawn.ts`
+  flags an Input outside one.
+- Claude Code empties an `Input` on Enter, and only hands a field the
+  `value` drawn when it differs from the last one. So the filter's field is
+  drawn under a new key after each Enter (`filterKeyOf`), and holds the text
+  as typed (`filtering.typed`), so a redraw never takes typing back. Esc in
+  a field gives the keyboard to the prompt; under the classic renderer it
+  closes an inline pane as a person's close (checked on 2.1.294).
+- A plugin's own `$.ui.focus` raises none of its own `ui.focus` hooks, and
+  the test kit answers it nowhere (a test's `ui.focus` hook never sees it,
+  2.1.294): note `lastFocused` and move the tree's window yourself, and test
+  the target pure (`firstMatchOf`).
 - The one-time fullscreen tip is a `$.store` flag (`fullscreenTipShown`),
   which Claude Code keeps in `~/.claude/plugins/store/`. A live probe under
   the classic renderer (`CLAUDE_CODE_NO_FLICKER=0 claude`) sets it: delete
@@ -148,7 +179,8 @@ the module otherwise:
   file when its mtime or size moved. A poll never writes state. A listing
   carries no folder's mtime (0 for folders), so each folder is stat'ed
   before it is listed. An in-place edit moves only the file's mtime, not its
-  folder's.
+  folder's. While the tree is filtered, the polls check the folders the
+  filtered tree shows, and a change among them reads the file list again.
 - Polls start in `command.run` and, as a reload cancels a module's waits
   but keeps its pane, again in `session.start` when the pane is open; the
   `ui.close` hook stops them, and a generation counter keeps a poll still

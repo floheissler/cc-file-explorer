@@ -1,4 +1,4 @@
-import { flattenTree, type DirListing, type TreeRow } from './tree'
+import { flattenTree, type DirListing, type PathSet, type TreeRow } from './tree'
 
 /**
  * A folder's listing, or undefined while it is not read.
@@ -21,7 +21,7 @@ export type LevelStep = {
 
 type FolderRow = Extract<TreeRow, { type: 'entry' }>
 
-function folderRowsOf(listingOf: ListingOf, expanded: ReadonlySet<string>): FolderRow[] {
+function folderRowsOf(listingOf: ListingOf, expanded: PathSet): FolderRow[] {
   return flattenTree(listingOf, expanded).filter(
     (row): row is FolderRow => row.type === 'entry' && row.kind === 'dir',
   )
@@ -46,7 +46,7 @@ function subfoldersOf(listingOf: ListingOf, dir: string): string[] {
  */
 async function readOpenFolders(
   listingOf: ListingOf,
-  expanded: ReadonlySet<string>,
+  expanded: PathSet,
   readDirs: ReadDirs,
 ): Promise<void> {
   let unread: string[] = []
@@ -83,7 +83,7 @@ async function readOpenFolders(
  */
 export async function expandOneLevel(
   listingOf: ListingOf,
-  expanded: ReadonlySet<string>,
+  expanded: PathSet,
   readDirs: ReadDirs,
   cap: number,
 ): Promise<LevelStep> {
@@ -107,7 +107,7 @@ export async function expandOneLevel(
  * @param expanded the folders open now
  * @returns the folders left open
  */
-export function collapseOneLevel(listingOf: ListingOf, expanded: ReadonlySet<string>): string[] {
+export function collapseOneLevel(listingOf: ListingOf, expanded: PathSet): string[] {
   const open = folderRowsOf(listingOf, expanded)
     .filter(row => row.isExpanded)
     .map(row => row.path)

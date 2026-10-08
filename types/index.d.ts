@@ -28,6 +28,11 @@ declare module 'claude-code' {
        * Whether the help view stands in for the tree and the preview.
        */
       helpShown: boolean
+      /**
+       * The filter's query: null while the filter is not shown; a blank
+       * query shows the whole tree under the filter's row.
+       */
+      filter: string | null
     }
   }
 }
