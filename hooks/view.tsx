@@ -105,6 +105,11 @@ export type PaneModel = {
   readonly layout: PaneLayout
   readonly selected: string | null
   /**
+   * The entry `/tree <path>` revealed, whose row takes the focus ring as the
+   * pane takes the keyboard, until the person moves the ring; null for none.
+   */
+  readonly revealed: string | null
+  /**
    * The selected file's preview, or null while it is read.
    */
   readonly preview: Preview | null
@@ -641,6 +646,10 @@ function treeRegion(kit: Kit, model: PaneModel): RenderElement {
   const { Box, Text } = kit.ui
   const { window, rows, layout } = model
 
+  // The row the ring starts on: the revealed one, else in an inline pane's
+  // tree the picked file's, so stepping back from the file lands on it
+  const landing = model.revealed ?? (model.inlineView === 'tree' ? model.selected : null)
+
   return (
     <Box flexDirection="column" height={layout.treeRows} overflow="hidden">
       {window.above > 0 && (
@@ -650,7 +659,7 @@ function treeRegion(kit: Kit, model: PaneModel): RenderElement {
       )}
       {rows
         .slice(window.start, window.end)
-        .map(row => treeRow(kit, row, model.marks, model.selected, model.inlineView === 'tree'))}
+        .map(row => treeRow(kit, row, model.marks, model.selected, landing))}
       {window.below > 0 && (
         <Text dimColor wrap="truncate-end">
           {truncateEnd(`↓ ${window.below} more`, kit.columns)}
@@ -715,16 +724,15 @@ function markTexts(kit: Kit, mark: RowMark, marks: TreeMarks): RenderElement[] {
  * its markers. An entry is a Button padded to the markers, or to the row's
  * end when it has none, so the name and the rest of the row press it; the
  * branch lines and the markers are drawing only. Names stop short of the
- * markers' cells in every row of a tree that has them. In an inline pane's
- * tree the picked file's row takes the focus ring as the pane takes the
- * keyboard, so stepping back from the file lands on it.
+ * markers' cells in every row of a tree that has them. The `landing` row
+ * takes the focus ring as the pane takes the keyboard.
  */
 function treeRow(
   kit: Kit,
   row: TreeRow,
   marks: TreeMarks,
   selected: string | null,
-  isInlineTree: boolean,
+  landing: string | null,
 ): RenderElement {
   const { Box, Text, Button } = kit.ui
   const markCells = markCellsOf(marks)
@@ -776,7 +784,7 @@ function treeRow(
         plain
         dimColor={!isDir && !isSelected}
         onPress={onPress}
-        {...(isInlineTree && isSelected ? { autoFocus: true } : {})}
+        {...(row.path === landing ? { autoFocus: true } : {})}
       />
       {mark !== undefined && cells > 0 && markTexts(kit, mark, marks)}
     </Box>

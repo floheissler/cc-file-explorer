@@ -4,6 +4,7 @@ import {
   ancestorsOf,
   extensionOf,
   foldKey,
+  isAbsolute,
   isSameKey,
   keyOf,
   nameOf,
@@ -80,33 +81,45 @@ describe('keyOf', () => {
     expect(keyOf('C:\\Proj', 'C:\\Proj\\a\\..\\b')).toBe('b')
     expect(keyOf('C:\\Proj', 'C:\\Proj')).toBe('')
     expect(keyOf('C:\\Proj\\', '\\\\?\\C:\\Proj\\x.txt')).toBe('x.txt')
+    expect(keyOf('\\\\?\\C:\\Proj', 'C:\\Proj\\x')).toBe('x')
+    expect(keyOf('C:\\Cafe\u0301', 'C:\\Caf\u00e9\\x')).toBe('x')
     expect(keyOf('C:\\', 'C:\\Windows\\win.ini')).toBe('Windows/win.ini')
+    expect(keyOf('C:\\', 'c:/')).toBe('')
   })
 
   test('a Windows path outside the root, or naming no place by itself, is null', async () => {
-    for (const path of ['C:\\Project\\x', 'D:\\Proj\\x', 'C:a.txt', '\\a.txt', '\\\\.\\C:\\Proj\\x', 'C:\\Proj\\..\\x']) {
+    for (const path of ['C:\\Project\\x', 'D:\\Proj\\x', 'C:a.txt', 'C:', '\\a.txt', '\\\\.\\C:\\Proj\\x', 'C:\\Proj\\..\\x']) {
       expect(keyOf('C:\\Proj', path), path).toBe(null)
     }
   })
 
   test('a share, its server and share names in any case', async () => {
     expect(keyOf('\\\\server\\share\\proj', '\\\\SERVER\\Share\\proj\\a\\b.md')).toBe('a/b.md')
+    expect(keyOf('\\\\server\\share\\proj', '//SERVER/share/proj/a/b')).toBe('a/b')
     expect(keyOf('\\\\server\\share\\proj', '\\\\?\\UNC\\server\\share\\proj\\c')).toBe('c')
     expect(keyOf('\\\\server\\share\\proj', '\\\\other\\share\\proj\\c')).toBe(null)
+    expect(keyOf('\\\\server\\share', '\\\\server\\x')).toBe(null)
   })
 
   test('a relative path is read from the root, and may not climb out of it', async () => {
     expect(keyOf('C:\\Proj', 'src\\main.ts')).toBe('src/main.ts')
+    expect(keyOf('C:\\Proj', './src/../README.md')).toBe('README.md')
+    expect(keyOf('C:\\Proj', '..\\Proj\\x')).toBe('x')
     expect(keyOf('/home/me/proj', 'src/./main.ts')).toBe('src/main.ts')
+    expect(keyOf('/home/me/proj', '../proj/src/')).toBe('src')
+    expect(keyOf('/home/me/proj', '.')).toBe('')
     expect(keyOf('/home/me/proj', '../other/x')).toBe(null)
   })
 
   test('POSIX compares case, and spellings rather than where links lead', async () => {
     expect(keyOf('/home/me/proj', '/home/me/proj/src/a.ts')).toBe('src/a.ts')
+    expect(keyOf('/home/me/proj', '/home/me/proj/')).toBe('')
     expect(keyOf('/home/me/proj', '/home/me/Proj/src/a.ts')).toBe(null)
+    expect(keyOf('/home/me/proj', '/home/me/proj2/x')).toBe(null)
     expect(keyOf('/private/tmp/p', '/tmp/p/x')).toBe(null)
     expect(keyOf('/', '/etc/hosts')).toBe('etc/hosts')
     expect(keyOf('/home/me', '/home/me/a\\b')).toBe('a\\b')
+    expect(keyOf('/home/me', 'C:\\x')).toBe('C:\\x')
   })
 
   test('composed and decomposed accents match, and keep their spelling below the root', async () => {
@@ -118,8 +131,17 @@ describe('keyOf', () => {
 describe('isSameKey', () => {
   test('folds case under Windows only, and composes accents everywhere', async () => {
     expect(isSameKey('SRC/Main.ts', 'src/main.ts', 'win32')).toBe(true)
+    expect(isSameKey('Cafe\u0301', 'caf\u00e9', 'win32')).toBe(true)
     expect(isSameKey('SRC/Main.ts', 'src/main.ts', 'posix')).toBe(false)
     expect(isSameKey('cafe\u0301', 'caf\u00e9', 'posix')).toBe(true)
+  })
+})
+
+describe('isAbsolute', () => {
+  test('a drive, a share or / starts an absolute path', async () => {
+    expect(['C:\\x', 'c:/x', '\\\\server\\share\\x', 'x', 'C:x', '\\x'].map(path => isAbsolute(path, 'win32')))
+      .toEqual([true, true, true, false, false, false])
+    expect(['/x', 'x', './x', 'C:\\x'].map(path => isAbsolute(path, 'posix'))).toEqual([true, false, false, false])
   })
 })
 

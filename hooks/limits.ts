@@ -124,6 +124,10 @@ const Limits = {
    * earliest are forgotten.
    */
   MAX_WRITTEN_FILES: 1_000,
+  /**
+   * Cells of a typed path a toast keeps; a longer one is cut in the middle.
+   */
+  TOAST_PATH_CELLS: 60,
 } as const
 
 export default Limits

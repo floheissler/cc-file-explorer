@@ -259,6 +259,19 @@ function resolvedParts(parts: readonly string[]): string[] {
 }
 
 /**
+ * Whether a path names its place by itself, from a volume (`/`, a drive, a
+ * share), rather than counting from a root it is read against.
+ *
+ * @param path the path
+ * @param style the root's style
+ * @returns whether it is absolute; false too for one that names no place by
+ *   its spelling (see `splitPath`)
+ */
+export function isAbsolute(path: string, style: PathStyle): boolean {
+  return splitPath(path, style)?.volume != null
+}
+
+/**
  * The key of a path from outside the tree: a tool's `file_path`, a path a
  * person typed, git's view of the repository. Absolute, or relative to the
  * root; read in the root's style, so either separator under Windows.

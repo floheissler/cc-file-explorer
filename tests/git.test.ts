@@ -320,3 +320,21 @@ describe('files Claude wrote this session', () => {
     expect(markersOf(await ui.drawn(), 'README.md')).toBe(' ✻')
   })
 })
+
+describe('/tree <path> in a marked tree', () => {
+  test('reveals a marked file: its marker drawn, its row whole, the ring starting on it', async ($, on) => {
+    mock.clock(on)
+    repoOf(on)
+
+    await $.command.run({ ...TREE, args: 'src/main.ts' })
+
+    const ui = await $.ui.mount(PANE)
+    await ui.redraw()
+
+    const drawn = await ui.drawn()
+
+    expect(markersOf(drawn, 'src/main.ts')).toBe(' M')
+    expect(rowWidthOf(drawn, 'src/main.ts')).toBe(PANE.props.bodyColumns - Limits.RIGHT_PAD_COLUMNS)
+    expect(await ui.find({ key: 'row:src/main.ts' })).toMatchObject({ props: { autoFocus: true } })
+  })
+})

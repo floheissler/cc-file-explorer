@@ -197,6 +197,36 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 }
 
+test('/tree <path> closes the filter and reveals the entry in the whole tree', async ($, on) => {
+  const clock = mock.clock(on)
+  stubProject(on)
+  await openTree($)
+
+  const ui = await $.ui.mount(paneOn('terminal'))
+
+  await ui.press({ key: 'filter' })
+  await ui.input({ key: filterKeyOf(0), text: 'butt', kind: 'change' })
+  await clock.advance(Limits.FILTER_DEBOUNCE_MS)
+  await ui.redraw()
+  expect(await rowsOf(ui)).toEqual(['src', 'src/components', 'src/components/Button.tsx'])
+
+  // docs/guide.md matches no query typed: it shows in the whole tree
+  await $.command.run({
+    command: 'tree',
+    args: 'docs/guide.md',
+    origin: { kind: 'composer' },
+    presentation: { isFullscreen: true, columns: 160 },
+  })
+  await ui.redraw()
+
+  expect(await ui.find({ key: filterKeyOf(0) })).toBeUndefined()
+  expect(await ui.find({ key: 'row:docs/guide.md' })).toMatchObject({ props: { autoFocus: true } })
+  expect(await rowsOf(ui)).toEqual(['docs', 'docs/guide.md', 'node_modules', 'src', 'README.md'])
+  expect(await ui.find({ type: 'Markdown' })).toBeDefined()
+
+  await ui.unmount()
+})
+
 test('Enter with nothing typed closes the filter', async ($, on) => {
   stubProject(on)
   await openTree($)
