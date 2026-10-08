@@ -21,11 +21,11 @@ import { branchPrefixOf, type TreeRow, type TreeWindow } from './tree'
 
 /**
  * The elements the pane draws with, from the table `$.ui.resolve(e)` hands
- * the render hook: the terminal and the desktop carry all five.
+ * the render hook: the terminal and the desktop carry all six.
  */
 export type Ui = Pick<
   ElementTable<'terminal' | 'desktop'>,
-  'Box' | 'Text' | 'Button' | 'Code' | 'Markdown'
+  'Box' | 'Text' | 'Button' | 'Code' | 'Markdown' | 'Input'
 >
 
 /**
@@ -51,6 +51,19 @@ export type PaneActions = {
   toggleMarkdownMode: () => Promise<void>
   closePreview: () => Promise<void>
   refresh: () => Promise<void>
+  /**
+   * Shows the filter and puts the keyboard in its field; shown, closes it.
+   */
+  toggleFilter: () => Promise<void>
+  /**
+   * The filter's text changed: the tree narrows to it once typing pauses.
+   */
+  typeFilter: (text: string) => Promise<void>
+  /**
+   * Enter in the filter: the focus goes to the first match; with nothing
+   * typed, the filter closes.
+   */
+  submitFilter: (text: string) => Promise<void>
 }
 
 /**
@@ -89,6 +102,32 @@ export type PaneModel = {
    * Whether the help view stands in for the tree and the preview.
    */
   readonly helpShown: boolean
+  /**
+   * The filter's row over the tree, null while the filter is not shown.
+   */
+  readonly filter: FilterModel | null
+}
+
+/**
+ * The filter's row as drawn: its field and what the query found.
+ */
+export type FilterModel = {
+  /**
+   * The field's key, which moves on at each Enter (`filterKeyOf`).
+   */
+  readonly key: string
+  /**
+   * The text the field is drawn holding: the query as typed.
+   */
+  readonly value: string
+  /**
+   * What the query found (`3 matches`), `''` for a blank query.
+   */
+  readonly status: string
+  /**
+   * Whether nothing is typed: Enter then closes the filter.
+   */
+  readonly isBlank: boolean
 }
 
 /**
@@ -104,11 +143,11 @@ type Kit = {
 }
 
 /**
- * The pane's tree: the header, then the help view, or the tree's window and
- * while a file is selected its preview. Each region is exactly as tall as
- * the layout says, so the drawing fits the body and the arrows walk the rows.
- * The keys the header does not show sit in a hidden box, which draws nothing
- * and keeps their hotkeys armed.
+ * The pane's tree: the header, then the help view, or the filter's row while
+ * shown, the tree's window and while a file is selected its preview. Each
+ * region is exactly as tall as the layout says, so the drawing fits the body
+ * and the arrows walk the rows. The keys the header does not show sit in a
+ * hidden box, which draws nothing and keeps their hotkeys armed.
  *
  * @param ui the surface's elements
  * @param actions what the controls do
@@ -149,10 +188,13 @@ export function paneView(
     )
   }
 
+  const filter = model.filter === null ? null : filterRow(kit, model.filter)
+
   if (model.inlineView === 'tree' || model.selected === null) {
     return (
       <Box flexDirection="column" width={columns}>
         {header.row}
+        {filter}
         {treeRegion(kit, model)}
         {hiddenKeys(kit, header.hidden)}
       </Box>
@@ -164,6 +206,7 @@ export function paneView(
   return (
     <Box flexDirection="column" width={columns}>
       {header.row}
+      {filter}
       {treeRegion(kit, model)}
       <Box height={1} />
       {previewTitleRow(kit, model.selected)}
@@ -282,11 +325,24 @@ function helpSectionsOf(seat: Seat): readonly HelpSection[] {
       ['1 – 9', 'open folders exactly that many levels deep'],
       ['0', 'close every folder'],
       ['r', 're-read the tree and the preview'],
+      ['f', 'filter the tree by name as you type; again to clear'],
       ['j  k', 'scroll the preview down, up'],
       ['m', 'Markdown preview: rendered or source'],
       ['x', isInline ? 'close the file, back to the tree' : 'close the preview'],
       ['h', 'show or hide this help'],
       ['Tab ↑ ↓', isInline ? 'move between rows; Enter shows a file' : 'move between rows; Enter opens'],
+    ],
+  }
+
+  const filter: HelpSection = {
+    title: 'Filter',
+    rows: [
+      ['Enter', 'go to the first match; with nothing typed, close the filter'],
+      ['↓ ↑', 'from the filter to the tree, and back'],
+      ['Esc', isInline && seat.isClassic ? 'close the filter' : 'give the keyboard back to the prompt'],
+    ],
+    notes: [
+      'Words match parts of names, in any case; a word with a / matches the path from the project root. Folders git ignores match by name, not by what they hold.',
     ],
   }
 
@@ -301,6 +357,7 @@ function helpSectionsOf(seat: Seat): readonly HelpSection[] {
   if (!isInline) {
     return [
       keys,
+      filter,
       mouse,
       {
         title: 'Pane',
@@ -327,7 +384,7 @@ function helpSectionsOf(seat: Seat): readonly HelpSection[] {
     ],
   }
 
-  return seat.isClassic ? [keys, pane] : [keys, mouse, pane]
+  return seat.isClassic ? [keys, filter, pane] : [keys, filter, mouse, pane]
 }
 
 /**
@@ -430,7 +487,7 @@ function helpRegion(kit: Kit, rows: number, seat: Seat): RenderElement {
 
 /**
  * The header: the project's name, then the tree's controls, as many labelled
- * as the width leaves the name its floor (`e c r h` in the order the help
+ * as the width leaves the name its floor (`e c r f h` in the order the help
  * lists them).
  */
 function headerRow(kit: Kit, model: PaneModel): Fitted {
@@ -440,6 +497,12 @@ function headerRow(kit: Kit, model: PaneModel): Fitted {
     { key: KEYS.expandLevel, hotkey: 'e', label: 'expand', onPress: kit.actions.expandLevel },
     { key: KEYS.collapseLevel, hotkey: 'c', label: 'collapse', onPress: kit.actions.collapseLevel },
     { key: KEYS.refresh, hotkey: 'r', label: 'refresh', onPress: kit.actions.refresh },
+    {
+      key: KEYS.filter,
+      hotkey: 'f',
+      label: model.filter === null ? 'filter' : 'clear',
+      onPress: kit.actions.toggleFilter,
+    },
     { key: KEYS.help, hotkey: 'h', label: model.helpShown ? 'back' : 'help', onPress: kit.actions.toggleHelp },
   ]
 
@@ -457,6 +520,53 @@ function headerRow(kit: Kit, model: PaneModel): Fitted {
     ),
     hidden: notLabelledIn(controls, legend),
   }
+}
+
+const FILTER_LABEL = 'filter'
+
+/**
+ * The cells the filter's field keeps to type in beside its label before
+ * what it found gives way.
+ */
+const FILTER_FIELD_FLOOR = 8
+
+/**
+ * The filter's row: its field, then what the query found while the field
+ * keeps its floor beside it.
+ *
+ * The field sits in a box exactly as wide as its share of the row, clipped:
+ * there Claude Code fits the field to the box, cutting a long query, where
+ * a field left to its natural width wraps a long query over the rows below
+ * (checked on 2.1.294). While the field has the keyboard, Claude Code draws
+ * what Enter does beside it: `go`, or `close` with nothing typed.
+ */
+function filterRow(kit: Kit, filter: FilterModel): RenderElement {
+  const { Box, Text, Input } = kit.ui
+  const statusCells = cellWidth(filter.status)
+  const floor = cellWidth(`${FILTER_LABEL}: `) + FILTER_FIELD_FLOOR
+  const showsStatus = statusCells > 0 && kit.columns - statusCells - 1 >= floor
+  const fieldCells = showsStatus ? kit.columns - statusCells - 1 : kit.columns
+
+  return (
+    <Box flexDirection="row" height={1} columnGap={1}>
+      <Box width={fieldCells} height={1} overflow="hidden" flexShrink={0}>
+        <Input
+          key={filter.key}
+          label={FILTER_LABEL}
+          placeholder="type a name"
+          value={filter.value}
+          submitLabel={filter.isBlank ? 'close' : 'go'}
+          onInput={kit.actions.typeFilter}
+          onSubmit={kit.actions.submitFilter}
+        />
+      </Box>
+      {showsStatus && (
+        <Text dimColor wrap="truncate-end">
+          {filter.status}
+        </Text>
+      )}
+    </Box>
+  )
 }
 
 function treeRegion(kit: Kit, model: PaneModel): RenderElement {

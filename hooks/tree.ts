@@ -66,6 +66,14 @@ export type TreeWindow = {
 }
 
 /**
+ * Which folders are open, asked one path at a time: a `Set` of keys, or a
+ * filtered tree's set, which compares keys folded.
+ */
+export type PathSet = {
+  readonly has: (path: string) => boolean
+}
+
+/**
  * A number held between two bounds.
  */
 export function clamp(value: number, min: number, max: number): number {
@@ -97,7 +105,7 @@ export function compareEntries(a: Entry, b: Entry): number {
  */
 export function flattenTree(
   listingOf: (dir: string) => DirListing | undefined,
-  expanded: ReadonlySet<string>,
+  expanded: PathSet,
 ): TreeRow[] {
   const rows: TreeRow[] = []
 

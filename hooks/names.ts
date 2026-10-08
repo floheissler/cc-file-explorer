@@ -37,12 +37,26 @@ export const KEYS = {
   refresh: 'refresh',
   expandLevel: 'expand-level',
   collapseLevel: 'collapse-level',
+  filter: 'filter',
   help: 'help',
   previewUp: 'preview-up',
   previewDown: 'preview-down',
   previewMode: 'preview-mode',
   previewClose: 'preview-close',
 } as const
+
+/**
+ * The key of the filter's field, drawn anew under the next key each time
+ * Enter is pressed in it: Claude Code empties a field on Enter and only
+ * hands a field the `value` drawn when it differs from the last one, so a
+ * new field is how the query stays in it.
+ *
+ * @param submits how many times Enter was pressed in the field
+ * @returns the key
+ */
+export function filterKeyOf(submits: number): string {
+  return `filter-field-${submits}`
+}
 
 /**
  * The key of the hidden Button whose digit hotkey opens the tree `levels`

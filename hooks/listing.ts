@@ -1,5 +1,6 @@
 import type { FsStat } from 'claude-code'
 
+import { gitFileListOf, type FileList, type FoundEntry } from './filter'
 import type { Host } from './host'
 import Limits from './limits'
 import { depthOf, joinPath, nativePathOf } from './paths'
@@ -35,6 +36,12 @@ export type PreviewRead = {
  * lists it. Everything else is, git-ignored entries included.
  */
 const GIT_DIR_NAME = '.git'
+
+/**
+ * Set over the session's environment for every git call: a read never takes
+ * a lock a commit running beside it needs, and git speaks plain C.
+ */
+const GIT_ENV = { GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' }
 
 /**
  * Starts a listing at the session's project root, nothing read yet.
@@ -261,4 +268,108 @@ export async function readPreview(
   } catch (error) {
     return { preview: noticeOf(path, 0, `Can't read this file: ${messageOf(error)}`), stamp }
   }
+}
+
+/**
+ * Reads the project's files and folders for the filter: from git in a work
+ * tree, which knows them all at once and what it ignores; elsewhere, or
+ * where git cannot answer, from the folders themselves, within bounds.
+ *
+ * @param host the engine's calls
+ * @param listing the listing the walk reads folders into
+ * @returns the list
+ */
+export async function readFileList(host: Host, listing: Listing): Promise<FileList> {
+  return (await gitFileList(host, listing.root)) ?? walkFileList(host, listing)
+}
+
+/**
+ * The file list git gives for the root: its tracked files, the untracked
+ * ones it does not ignore, and what it ignores, an ignored folder as itself
+ * alone. Paths are relative to the root, as git lists from its working
+ * directory, and `/`-separated on every platform.
+ *
+ * @returns the list, or null where git is missing, the root is no work
+ *   tree, or git lists nothing (a root inside an ignored folder)
+ */
+async function gitFileList(host: Host, root: string): Promise<FileList | null> {
+  const init = { cwd: nativePathOf(root, ''), env: GIT_ENV, timeoutMs: Limits.GIT_TIMEOUT_MS }
+
+  const git = async (args: readonly string[]) => {
+    try {
+      const run = await host.run(['git', ...args], init)
+
+      return run.exitCode === 0 ? run : null
+    } catch {
+      return null
+    }
+  }
+
+  const [listed, deleted, ignored] = await Promise.all([
+    git(['ls-files', '-z', '--cached', '--others', '--exclude-standard']),
+    git(['ls-files', '-z', '--deleted']),
+    git(['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory']),
+  ])
+
+  if (listed === null) {
+    return null
+  }
+
+  const list = gitFileListOf({
+    listed: listed.stdout,
+    deleted: deleted?.stdout ?? null,
+    ignored: ignored?.stdout ?? null,
+    isTruncated: listed.isStdoutTruncated || ignored?.isStdoutTruncated === true,
+  })
+
+  return list.entries.length === 0 ? null : list
+}
+
+/**
+ * The file list a walk of the folders gives, shallowest first, `.git` left
+ * out, up to `MAX_WALK_FOLDERS` folders and `MAX_WALK_ENTRIES` entries.
+ * Every folder is read anew, as one the tree read before may have changed
+ * since, into the listing, so the filtered tree draws from them at once.
+ */
+async function walkFileList(host: Host, listing: Listing): Promise<FileList> {
+  const entries: FoundEntry[] = []
+  let level = ['']
+  let folders = 0
+  let isPartial = false
+
+  while (level.length > 0) {
+    const batch = level.slice(0, Math.max(0, Limits.MAX_WALK_FOLDERS - folders))
+
+    isPartial ||= batch.length < level.length
+    folders += batch.length
+    await readDirs(host, listing, batch)
+
+    const next: string[] = []
+
+    for (const dir of batch) {
+      const read = listing.dirs.get(dir)
+
+      if (read === undefined || 'error' in read) {
+        continue
+      }
+
+      isPartial ||= read.truncated > 0
+
+      for (const entry of read.entries) {
+        if (entries.length >= Limits.MAX_WALK_ENTRIES) {
+          return { entries, isPartial: true }
+        }
+
+        entries.push({ path: entry.path, kind: entry.kind === 'dir' ? 'dir' : 'file' })
+
+        if (entry.kind === 'dir') {
+          next.push(entry.path)
+        }
+      }
+    }
+
+    level = next
+  }
+
+  return { entries, isPartial }
 }

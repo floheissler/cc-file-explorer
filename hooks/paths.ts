@@ -149,3 +149,31 @@ export function parentOf(key: string): string {
 
   return cut < 0 ? '' : key.slice(0, cut)
 }
+
+/**
+ * The folders that hold a key, outermost first, the root left out.
+ *
+ * @param key a key
+ * @returns their keys: `['a', 'a/b']` for `a/b/c.ts`
+ */
+export function ancestorsOf(key: string): string[] {
+  const parts = key.split('/').slice(0, -1)
+
+  return parts.map((_, at) => parts.slice(0, at + 1).join('/'))
+}
+
+/**
+ * A key as the root's file system compares it: composed (NFC) everywhere,
+ * as macOS and git there spell an accent either way, and lowercase too under
+ * win32, whose names ignore case. Two spellings of one entry fold alike, so
+ * a path another program spelled (git) finds the entry `$.fs.list` named.
+ *
+ * @param key a key
+ * @param style the root's style
+ * @returns the folded key, for comparing only: never a key itself
+ */
+export function foldKey(key: string, style: PathStyle): string {
+  const composed = key.normalize('NFC')
+
+  return style === 'win32' ? composed.toLowerCase() : composed
+}
