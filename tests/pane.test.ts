@@ -93,13 +93,13 @@ const openTree = ($: Engine) =>
   })
 
 /**
- * The docked pane on the terminal, `bodyRows` tall.
+ * The docked pane on the terminal, `bodyRows` tall and `bodyColumns` wide.
  */
-const paneOf = (bodyRows: number) =>
+const paneOf = (bodyRows: number, bodyColumns: number = PANE.props.bodyColumns) =>
   ({
     ...PANE,
     surface: 'terminal',
-    props: { ...PANE.props, scroll: { offset: 0, bodyRows } },
+    props: { ...PANE.props, bodyColumns, scroll: { offset: 0, bodyRows } },
   }) as const
 
 /**
@@ -241,7 +241,8 @@ test('the focus ring stops at the tree’s last row and wraps from the other end
   const focused = recordFocus(on)
   await openTree($)
 
-  const ui = await $.ui.mount(paneOf(30))
+  // Wide enough for the header to draw every control, `expand` first
+  const ui = await $.ui.mount(paneOf(30, 80))
 
   // Past the last row lie the hidden digit Buttons: the ring stays put
   await $.ui.focus(ringOnto('row:f02.txt'))

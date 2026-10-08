@@ -49,6 +49,16 @@ const Limits = {
    */
   RIGHT_PAD_COLUMNS: 1,
   /**
+   * The cells a row's name keeps before its controls give up their labels.
+   */
+  NAME_FLOOR_CELLS: 8,
+  /**
+   * The cells the source preview's gutter takes beyond its line numbers'
+   * digits: one before the right-aligned numbers and one after (checked on
+   * Claude Code 2.1.294).
+   */
+  CODE_GUTTER_PAD: 2,
+  /**
    * The body rows an inline pane asks for: as tall as its content, up to
    * this, so a long tree leaves some of the conversation in view.
    */

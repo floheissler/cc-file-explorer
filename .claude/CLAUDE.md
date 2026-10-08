@@ -108,10 +108,23 @@ the module otherwise:
   `wrap="truncate-*"` as a guard.
 - Hotkeys are one lowercase letter or digit: the engine reads Shift+e as `e`,
   `?` cannot be one, and a mod cannot bind Ctrl or Alt chords of its own.
-  The digit keys, listed only in the help view, are Buttons in a
-  `display: 'none'` box, whose hotkeys stay armed (checked on 2.1.293; check
-  again after Claude Code updates). Never give two drawn Buttons one hotkey:
-  the later wins.
+  The digit keys, listed only in the help view, and every control a narrow
+  row leaves out of its legend, are Buttons in a `display: 'none'` box,
+  whose hotkeys stay armed (checked on 2.1.293; check again after Claude
+  Code updates). Every control is drawn exactly once, in its row or there.
+  Never give two drawn Buttons one hotkey: the later wins.
+- A row of controls is fitted by `fit.ts`: `fitRow` picks the richest of
+  `legendsOf` (every control labelled; a hint of keys and the last control;
+  the last alone; none) that leaves the row's name `NAME_FLOOR_CELLS`.
+  Buttons never shrink, so nothing else can keep such a row on one line.
+  `tests/drawn.ts` models drawn widths, and `tests/narrow.test.ts` sweeps
+  every view at 16–120 columns, docked and inline, for rows wider than the
+  body, doubled hotkeys and the engine's fallback drawing.
+- Only the dock keeps `RIGHT_PAD_COLUMNS` clear; inline rows use the body's
+  full width.
+- A source preview wraps long lines, so its scroll end counts wrapped rows:
+  `sourceColumnsOf` takes the gutter (a cell, the right-aligned digits, a
+  cell, checked live on 2.1.294) from the row.
 - A tree row is a dim `Text` of branch lines (`branchPrefixOf`, from the
   `guides`/`isLast` that `flattenTree` computes) beside a `Button` keyed
   `row:<path>` for the glyph and name; the `ui.focus` hook relies on the key.

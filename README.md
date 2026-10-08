@@ -56,6 +56,13 @@ The header shows the tree's keys, `e: expand  c: collapse  r: refresh  h: help`,
 and a previewed file's row its own, `k: ↑  j: ↓  m: source  x: close` (`x: back`
 above the prompt); `h` opens a help view with all of them.
 
+In a narrow pane (the dock opens 40 columns wide on a 110-column terminal)
+the rows shorten to fit. The header's keys become `e c r  h: help`, then
+`h: help` alone; the project's name keeps at least 8 columns. A previewed
+file's facts shorten from size, lines and mode to its size, and its keys step
+down the same way. Every key keeps working, and the help view's
+descriptions wrap to the width.
+
 | Do this | To |
 | --- | --- |
 | Click a folder, or focus it and press Enter | Expand or collapse it |
@@ -112,7 +119,7 @@ The tree and the open preview keep up with the disk:
 | --- | --- |
 | `.md`, `.markdown`, `.mdx` | Rendered Markdown, or its source with `m` |
 | `.csv`, `.tsv` | A table under its header row; long cells are cut at 32 columns |
-| Any other text | Source with syntax colors by extension, and line numbers |
+| Any other text | Source with syntax colors by extension, and line numbers; long lines wrap, and the preview scrolls until the file's last line shows |
 | Binary, empty, over 2 MB | A notice in place of the text |
 
 File names and text are drawn safely: control characters show as their

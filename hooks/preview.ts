@@ -1,7 +1,7 @@
 import Limits from './limits'
 import { extensionOf } from './paths'
 import { clamp } from './tree'
-import { clipChars, expandTabs, formatBytes, sanitize, truncateEnd } from './text'
+import { cellWidth, clipChars, expandTabs, formatBytes, sanitize, truncateEnd } from './text'
 
 /**
  * A file as the preview shows it: Markdown or source lines, the rows of a
@@ -261,10 +261,59 @@ export function previewHeightOf(preview: Preview | null): number {
  * @param isSource whether it draws as source lines
  * @returns the largest top
  */
-export function maxPreviewTop(preview: Preview, rows: number, isSource: boolean): number {
+export function maxPreviewTop(
+  preview: Preview,
+  rows: number,
+  isSource: boolean,
+  contentColumns?: number,
+): number {
   const length = lengthOf(preview)
 
-  return Math.max(0, isSource ? length - rows : length - 1)
+  if (!isSource) {
+    return Math.max(0, length - 1)
+  }
+
+  if (contentColumns === undefined || (preview.kind !== 'code' && preview.kind !== 'markdown')) {
+    return Math.max(0, length - rows)
+  }
+
+  // Source wraps a line wider than the room onto rows under the gutter: the
+  // last top is the first line from which the rest fills the rows
+  const { lines } = preview
+  let used = 0
+  let top = lines.length
+
+  while (top > 0) {
+    const need = rowsOfLine(lines[top - 1] ?? '', contentColumns)
+
+    if (used + need > rows) {
+      break
+    }
+
+    used += need
+    top -= 1
+  }
+
+  return Math.min(top, Math.max(0, length - 1))
+}
+
+/**
+ * The rows one source line takes, wrapped to the room beside the gutter.
+ */
+function rowsOfLine(line: string, columns: number): number {
+  return Math.max(1, Math.ceil(cellWidth(line) / Math.max(1, columns)))
+}
+
+/**
+ * The cells a source preview has for its text: the row less the gutter,
+ * whose right-aligned line numbers grow with the file.
+ *
+ * @param lineCount the file's lines
+ * @param columns the cells across a row
+ * @returns the cells for the text
+ */
+export function sourceColumnsOf(lineCount: number, columns: number): number {
+  return Math.max(1, columns - String(Math.max(1, lineCount)).length - Limits.CODE_GUTTER_PAD)
 }
 
 /**

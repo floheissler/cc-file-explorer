@@ -183,7 +183,7 @@ describe('an inline pane', () => {
     await ui.press({ key: 'help' })
     expect(await ui.find({ type: 'Text', text: 'Mouse' })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: 'Esc' })).toBeDefined()
-    expect(regionHeightsOf(await ui.drawn())[1]).toBe(helpHeightOf({ placement: 'inline', isClassic: true }))
+    expect(regionHeightsOf(await ui.drawn())[1]).toBe(helpHeightOf({ placement: 'inline', isClassic: true }, 76))
     await ui.unmount()
   })
 })

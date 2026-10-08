@@ -32,7 +32,7 @@ import {
 } from './names'
 import { rootLabelOf } from './paths'
 import { changedDirsOf, mayHaveWritten, pollBatchOf, shownDirsOf } from './poll'
-import { maxPreviewTop, previewHeightOf, type Preview } from './preview'
+import { maxPreviewTop, previewHeightOf, sourceColumnsOf, type Preview } from './preview'
 import { messageOf } from './text'
 import {
   clamp,
@@ -75,6 +75,10 @@ const HELP_SHOWN = atom({ plugin: 'file-explorer', key: 'helpShown' } as const, 
 type Drawn = {
   readonly rows: readonly TreeRow[]
   readonly layout: PaneLayout
+  /**
+   * The cells across a row.
+   */
+  readonly columns: number
 }
 
 /**
@@ -335,7 +339,12 @@ export const register: Register = on => {
       preview.kind === 'code' ||
       (preview.kind === 'markdown' && (await host.state.markdownMode.get()) === 'source')
 
-    const max = maxPreviewTop(preview, drawn.layout.previewRows, isSource)
+    const textColumns =
+      preview.kind === 'code' || preview.kind === 'markdown'
+        ? sourceColumnsOf(preview.lines.length, drawn.columns)
+        : undefined
+
+    const max = maxPreviewTop(preview, drawn.layout.previewRows, isSource, textColumns)
 
     await host.state.previewTop.set(top => clamp(Math.min(top, max) + by, 0, max))
   }
@@ -756,6 +765,12 @@ export const register: Register = on => {
     // tall as its content.
     seat = { placement: e.props.placement, isClassic: e.viewport?.isFullscreen === false }
 
+    // The cells across a row: the dock keeps a column clear at its edge
+    const columns = Math.max(
+      1,
+      e.props.bodyColumns - (seat.placement === 'dock' ? Limits.RIGHT_PAD_COLUMNS : 0),
+    )
+
     const shownPreview = isPreviewStale ? null : preview
     const inlineView = seat.placement === 'inline' ? inlineViewOf({ helpShown, isFileShown, selected }) : null
 
@@ -769,19 +784,19 @@ export const register: Register = on => {
               ? rows.length
               : inlineView === 'file'
                 ? previewHeightOf(shownPreview)
-                : helpHeightOf(seat),
+                : helpHeightOf(seat, columns),
           )
 
     const window = treeWindowOf(rows.length, treeTop, layout.treeRows)
 
     // The help view stands in for the tree: the scroll and focus hooks then
     // have no rows to steer
-    drawn = helpShown ? null : { rows, layout }
+    drawn = helpShown ? null : { rows, layout, columns }
 
     const tree = paneView(
       { Box, Text, Button, Code, Markdown },
       actionsOf(host),
-      Math.max(12, e.props.bodyColumns - Limits.RIGHT_PAD_COLUMNS),
+      columns,
       {
         seat,
         inlineView,

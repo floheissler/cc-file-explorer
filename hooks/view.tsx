@@ -4,7 +4,9 @@
 import type { ElementTable, RenderElement } from 'claude-code'
 
 import type { MarkdownMode } from '../types'
+import { fitRow, hintOf, legendsOf, wrapCells, type Control, type Legend } from './fit'
 import type { InlineView, PaneLayout } from './layout'
+import Limits from './limits'
 import { depthKeyOf, KEYS, ROW_KEY_PREFIX } from './names'
 import { nameOf } from './paths'
 import {
@@ -124,58 +126,91 @@ export function paneView(
   const kit: Kit = { ui, actions, columns }
 
   if (model.inlineView === 'file' && model.selected !== null) {
+    const head = inlineFileHeadRow(kit, model, model.selected)
+
     return (
       <Box flexDirection="column" width={columns}>
-        {inlineFileHeadRow(kit, model, model.selected)}
+        {head.row}
         {previewRegion(kit, model)}
-        {hiddenKeys(kit)}
+        {hiddenKeys(kit, head.hidden)}
       </Box>
     )
   }
+
+  const header = headerRow(kit, model)
 
   if (model.helpShown) {
     return (
       <Box flexDirection="column" width={columns}>
-        {headerRow(kit, model)}
+        {header.row}
         {helpRegion(kit, model.layout.bodyRows - 1, model.seat)}
-        {hiddenKeys(kit)}
+        {hiddenKeys(kit, header.hidden)}
       </Box>
     )
   }
 
-  if (model.inlineView === 'tree') {
+  if (model.inlineView === 'tree' || model.selected === null) {
     return (
       <Box flexDirection="column" width={columns}>
-        {headerRow(kit, model)}
+        {header.row}
         {treeRegion(kit, model)}
-        {hiddenKeys(kit)}
+        {hiddenKeys(kit, header.hidden)}
       </Box>
     )
   }
+
+  const meta = previewMetaRow(kit, model)
 
   return (
     <Box flexDirection="column" width={columns}>
-      {headerRow(kit, model)}
+      {header.row}
       {treeRegion(kit, model)}
-      {model.selected !== null && <Box height={1} />}
-      {model.selected !== null && previewTitleRow(kit, model.selected)}
-      {model.selected !== null && previewMetaRow(kit, model)}
-      {model.selected !== null && previewRegion(kit, model)}
-      {hiddenKeys(kit)}
+      <Box height={1} />
+      {previewTitleRow(kit, model.selected)}
+      {meta.row}
+      {previewRegion(kit, model)}
+      {hiddenKeys(kit, [...header.hidden, ...meta.hidden])}
     </Box>
   )
 }
 
 /**
- * The digit hotkeys that set the tree's depth, listed in the help view but
- * not in the header. A `display: 'none'` box draws nothing, and Claude Code
- * still arms the hotkeys of the Buttons in it (checked on 2.1.293).
+ * A control the pane draws, with what pressing it does.
  */
-function hiddenKeys(kit: Kit): RenderElement {
+type ActionControl = Control & {
+  readonly onPress: () => Promise<void>
+}
+
+/**
+ * A row fitted to the pane's width, and the controls it does not draw
+ * labelled: they keep their hotkeys in the hidden box.
+ */
+type Fitted = {
+  readonly row: RenderElement
+  readonly hidden: readonly ActionControl[]
+}
+
+/**
+ * The keys the rows do not draw: the digits that set the tree's depth,
+ * listed in the help view only, and each row's controls left out of its
+ * legend in a narrow pane. A `display: 'none'` box draws nothing, and
+ * Claude Code still arms the hotkeys of the Buttons in it (checked on
+ * 2.1.293); every control is drawn exactly once, here or in its row.
+ */
+function hiddenKeys(kit: Kit, hidden: readonly ActionControl[]): RenderElement {
   const { Box, Button } = kit.ui
 
   return (
     <Box display="none">
+      {hidden.map(control => (
+        <Button
+          key={control.key}
+          label={control.label}
+          hotkey={control.hotkey}
+          plain
+          onPress={control.onPress}
+        />
+      ))}
       {DIGITS.map(levels => (
         <Button
           key={depthKeyOf(levels)}
@@ -188,6 +223,33 @@ function hiddenKeys(kit: Kit): RenderElement {
     </Box>
   )
 }
+
+/**
+ * A legend's items: the hint of keys, in the color a plain Button draws its
+ * hotkey in, then the labelled Buttons.
+ */
+function legendItems(kit: Kit, legend: Legend, controls: readonly ActionControl[]): RenderElement[] {
+  const { Text, Button } = kit.ui
+  const hint = hintOf(legend)
+  const labelled = controls.filter(control => legend.labelled.includes(control))
+
+  return [
+    ...(hint === '' ? [] : [<Text color="suggestion">{hint}</Text>]),
+    ...labelled.map(control => (
+      <Button
+        key={control.key}
+        label={control.label}
+        hotkey={control.hotkey}
+        plain
+        dimColor
+        onPress={control.onPress}
+      />
+    )),
+  ]
+}
+
+const notLabelledIn = (controls: readonly ActionControl[], legend: Legend) =>
+  controls.filter(control => !legend.labelled.includes(control))
 
 const DIGITS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as const
 
@@ -269,102 +331,132 @@ function helpSectionsOf(seat: Seat): readonly HelpSection[] {
 }
 
 /**
- * The rows the help view takes drawn whole: each section's title, rows and
- * notes, and a blank row between sections.
- *
- * @param seat where the pane sits
- * @returns the rows
+ * One row of the help view as drawn: a section's title, a key and a row of
+ * what it does (a description wrapped over rows has no key on the rest), a
+ * note's row, or a blank row between sections.
  */
-export function helpHeightOf(seat: Seat): number {
-  const sections = helpSectionsOf(seat)
-
-  return sections.reduce(
-    (rows, section, at) => rows + (at > 0 ? 1 : 0) + 1 + section.rows.length + (section.notes?.length ?? 0),
-    0,
-  )
-}
+type HelpLine =
+  | { readonly kind: 'title' | 'note'; readonly text: string }
+  | { readonly kind: 'key'; readonly keys: string; readonly text: string }
+  | { readonly kind: 'blank' }
 
 const HELP_KEY_COLUMNS = 12
 
+/**
+ * The cells the help view gives its key column: 12, or half a narrow pane.
+ */
+const helpKeyColumnsOf = (columns: number) => Math.max(1, Math.min(HELP_KEY_COLUMNS, Math.floor(columns / 2)))
+
+/**
+ * The help view's rows at a width, every description and note wrapped to
+ * fit it.
+ *
+ * @param seat where the pane sits
+ * @param columns the cells across a row
+ * @returns the rows
+ */
+function helpLinesOf(seat: Seat, columns: number): HelpLine[] {
+  const keyColumns = helpKeyColumnsOf(columns)
+  const room = Math.max(1, columns - keyColumns)
+
+  return helpSectionsOf(seat).flatMap((section, at): HelpLine[] => [
+    ...(at > 0 ? [{ kind: 'blank' } as const] : []),
+    { kind: 'title', text: truncateEnd(section.title, columns) },
+    ...section.rows.flatMap(([keys, does]) =>
+      wrapCells(does, room).map(
+        (text, row): HelpLine => ({
+          kind: 'key',
+          keys: row === 0 ? padEnd(truncateEnd(keys, Math.max(1, keyColumns - 1)), keyColumns) : ' '.repeat(keyColumns),
+          text,
+        }),
+      ),
+    ),
+    ...(section.notes ?? []).flatMap(note => wrapCells(note, columns).map((text): HelpLine => ({ kind: 'note', text }))),
+  ])
+}
+
+/**
+ * The rows the help view takes drawn whole at a width.
+ *
+ * @param seat where the pane sits
+ * @param columns the cells across a row
+ * @returns the rows
+ */
+export function helpHeightOf(seat: Seat, columns: number): number {
+  return helpLinesOf(seat, columns).length
+}
+
 function helpRegion(kit: Kit, rows: number, seat: Seat): RenderElement {
   const { Box, Text } = kit.ui
-  const room = Math.max(1, kit.columns - HELP_KEY_COLUMNS)
+
+  const lineOf = (line: HelpLine): RenderElement => {
+    switch (line.kind) {
+      case 'blank':
+        return <Box height={1} />
+      case 'title':
+        return (
+          <Text bold wrap="truncate-end">
+            {line.text}
+          </Text>
+        )
+      case 'note':
+        return (
+          <Text dimColor italic wrap="truncate-end">
+            {line.text}
+          </Text>
+        )
+      case 'key':
+        return (
+          <Box flexDirection="row" height={1}>
+            <Text color="suggestion">{line.keys}</Text>
+            <Text dimColor wrap="truncate-end">
+              {line.text}
+            </Text>
+          </Box>
+        )
+    }
+  }
 
   // The inner box keeps its natural height inside the clipped region: rows
   // shrunk to fit would drop or overprint lines instead of clipping them
   return (
     <Box flexDirection="column" height={Math.max(1, rows)} overflow="hidden">
       <Box flexDirection="column" flexShrink={0}>
-        {helpSectionsOf(seat).flatMap((section, at) => [
-          ...(at > 0 ? [<Box height={1} />] : []),
-          <Text bold wrap="truncate-end">
-            {section.title}
-          </Text>,
-          ...section.rows.map(([keys, does]) => (
-            <Box flexDirection="row" height={1}>
-              <Text color="suggestion">{padEnd(keys, HELP_KEY_COLUMNS)}</Text>
-              <Text dimColor wrap="truncate-end">
-                {truncateEnd(does, room)}
-              </Text>
-            </Box>
-          )),
-          ...(section.notes ?? []).map(note => (
-            <Text dimColor italic wrap="truncate-end">
-              {truncateEnd(note, kit.columns)}
-            </Text>
-          )),
-        ])}
+        {helpLinesOf(seat, kit.columns).map(lineOf)}
       </Box>
     </Box>
   )
 }
 
-function headerRow(kit: Kit, model: PaneModel): RenderElement {
-  const { Box, Text, Button } = kit.ui
-  const helpLabel = model.helpShown ? 'back' : 'help'
-  const controls = `e: expand c: collapse r: refresh h: ${helpLabel}`
-  const nameRoom = Math.max(4, kit.columns - cellWidth(controls) - 2)
+/**
+ * The header: the project's name, then the tree's controls, as many labelled
+ * as the width leaves the name its floor (`e c r h` in the order the help
+ * lists them).
+ */
+function headerRow(kit: Kit, model: PaneModel): Fitted {
+  const { Box, Text } = kit.ui
 
-  return (
-    <Box flexDirection="row" height={1} columnGap={1}>
-      <Text bold wrap="truncate-end">
-        {truncateMiddle(sanitize(model.rootName), nameRoom)}
-      </Text>
-      <Box flexGrow={1} />
-      <Button
-        key={KEYS.expandLevel}
-        label="expand"
-        hotkey="e"
-        plain
-        dimColor
-        onPress={kit.actions.expandLevel}
-      />
-      <Button
-        key={KEYS.collapseLevel}
-        label="collapse"
-        hotkey="c"
-        plain
-        dimColor
-        onPress={kit.actions.collapseLevel}
-      />
-      <Button
-        key={KEYS.help}
-        label={helpLabel}
-        hotkey="h"
-        plain
-        dimColor
-        onPress={kit.actions.toggleHelp}
-      />
-      <Button
-        key={KEYS.refresh}
-        label="refresh"
-        hotkey="r"
-        plain
-        dimColor
-        onPress={kit.actions.refresh}
-      />
-    </Box>
-  )
+  const controls: readonly ActionControl[] = [
+    { key: KEYS.expandLevel, hotkey: 'e', label: 'expand', onPress: kit.actions.expandLevel },
+    { key: KEYS.collapseLevel, hotkey: 'c', label: 'collapse', onPress: kit.actions.collapseLevel },
+    { key: KEYS.refresh, hotkey: 'r', label: 'refresh', onPress: kit.actions.refresh },
+    { key: KEYS.help, hotkey: 'h', label: model.helpShown ? 'back' : 'help', onPress: kit.actions.toggleHelp },
+  ]
+
+  const { legend, room } = fitRow(kit.columns, legendsOf(controls), Limits.NAME_FLOOR_CELLS)
+
+  return {
+    row: (
+      <Box flexDirection="row" height={1} columnGap={1}>
+        <Text bold wrap="truncate-middle">
+          {truncateMiddle(sanitize(model.rootName), room)}
+        </Text>
+        <Box flexGrow={1} />
+        {legendItems(kit, legend, controls)}
+      </Box>
+    ),
+    hidden: notLabelledIn(controls, legend),
+  }
 }
 
 function treeRegion(kit: Kit, model: PaneModel): RenderElement {
@@ -374,13 +466,17 @@ function treeRegion(kit: Kit, model: PaneModel): RenderElement {
   return (
     <Box flexDirection="column" height={layout.treeRows} overflow="hidden">
       {window.above > 0 && (
-        <Text dimColor wrap="truncate-end">{`↑ ${window.above} more`}</Text>
+        <Text dimColor wrap="truncate-end">
+          {truncateEnd(`↑ ${window.above} more`, kit.columns)}
+        </Text>
       )}
       {rows
         .slice(window.start, window.end)
         .map(row => treeRow(kit, row, model.selected, model.inlineView === 'tree'))}
       {window.below > 0 && (
-        <Text dimColor wrap="truncate-end">{`↓ ${window.below} more`}</Text>
+        <Text dimColor wrap="truncate-end">
+          {truncateEnd(`↓ ${window.below} more`, kit.columns)}
+        </Text>
       )}
     </Box>
   )
@@ -467,11 +563,12 @@ function treeRow(
 
 /**
  * The rule that sets the preview off from the tree, carrying the file's
- * name: `── README.md ──────`.
+ * name, drawn to exactly the row's width: `── README.md ──────`.
  */
 function previewTitleRow(kit: Kit, selected: string): RenderElement {
   const { Box, Text } = kit.ui
-  const name = truncateMiddle(sanitize(nameOf(selected)), Math.max(4, kit.columns - 8))
+  const name = truncateMiddle(sanitize(nameOf(selected)), Math.max(1, kit.columns - 5))
+  const rule = Math.max(0, kit.columns - 4 - cellWidth(name))
 
   return (
     <Box flexDirection="row" height={1}>
@@ -479,49 +576,65 @@ function previewTitleRow(kit: Kit, selected: string): RenderElement {
       <Text bold wrap="truncate-middle">
         {name}
       </Text>
-      <Text dimColor wrap="truncate-end">{` ${'─'.repeat(kit.columns)}`}</Text>
+      <Text dimColor wrap="truncate-end">{` ${'─'.repeat(rule)}`}</Text>
     </Box>
   )
 }
 
 /**
  * An inline pane's file view starts with one row: the file's name set in a
- * rule, then its controls; `x` steps back to the tree.
+ * rule, then its controls, as many labelled as the width leaves the name its
+ * floor; `x` steps back to the tree.
  */
-function inlineFileHeadRow(kit: Kit, model: PaneModel, selected: string): RenderElement {
+function inlineFileHeadRow(kit: Kit, model: PaneModel, selected: string): Fitted {
   const { Box, Text } = kit.ui
-  const controls = previewControls(kit, model, 'back')
-  const name = truncateMiddle(sanitize(nameOf(selected)), Math.max(4, kit.columns - 40))
+  const controls = previewControlsOf(kit, model, 'back')
 
-  return (
-    <Box flexDirection="row" height={1} columnGap={1}>
-      <Text dimColor>{'──'}</Text>
-      <Text bold wrap="truncate-middle">
-        {name}
-      </Text>
-      <Text dimColor>{'──'}</Text>
-      <Box flexGrow={1} />
-      {controls}
-    </Box>
-  )
+  // The two rules take two cells each, set off from the name by the gap
+  const { legend, room } = fitRow(kit.columns, legendsOf(controls), Limits.NAME_FLOOR_CELLS, {
+    fixedCells: 4,
+    children: 3,
+  })
+
+  return {
+    row: (
+      <Box flexDirection="row" height={1} columnGap={1}>
+        <Text dimColor>{'──'}</Text>
+        <Text bold wrap="truncate-middle">
+          {truncateMiddle(sanitize(nameOf(selected)), room)}
+        </Text>
+        <Text dimColor>{'──'}</Text>
+        <Box flexGrow={1} />
+        {legendItems(kit, legend, controls)}
+      </Box>
+    ),
+    hidden: notLabelledIn(controls, legend),
+  }
 }
 
-function metaTextOf(preview: Preview | null, markdownMode: MarkdownMode): string {
+/**
+ * The previewed file's facts for its meta row, richest first, down to its
+ * size alone: the row draws the richest that fits.
+ */
+function metaTextsOf(preview: Preview | null, markdownMode: MarkdownMode): string[] {
   if (preview === null) {
-    return ''
+    return ['']
   }
 
   const size = formatBytes(preview.size)
 
   switch (preview.kind) {
-    case 'markdown':
-      return `${size} · ${plural(preview.lines.length, 'line')} · ${markdownMode}`
+    case 'markdown': {
+      const lines = `${size} · ${plural(preview.lines.length, 'line')}`
+
+      return [`${lines} · ${markdownMode}`, lines, size]
+    }
     case 'code':
-      return `${size} · ${plural(preview.lines.length, 'line')}`
+      return [`${size} · ${plural(preview.lines.length, 'line')}`, size]
     case 'table':
-      return `${size} · ${plural(lengthOf(preview), 'row')}`
+      return [`${size} · ${plural(lengthOf(preview), 'row')}`, size]
     case 'notice':
-      return preview.size > 0 ? size : ''
+      return [preview.size > 0 ? size : '']
   }
 }
 
@@ -529,8 +642,7 @@ function metaTextOf(preview: Preview | null, markdownMode: MarkdownMode): string
  * The previewed file's controls: scroll it (when it has lines), switch a
  * Markdown file's form, and close it, `x` labelled for where it leads.
  */
-function previewControls(kit: Kit, model: PaneModel, closeLabel: string): RenderElement[] {
-  const { Button } = kit.ui
+function previewControlsOf(kit: Kit, model: PaneModel, closeLabel: string): readonly ActionControl[] {
   const { preview, markdownMode } = model
   const isScrollable = preview !== null && lengthOf(preview) > 0
   const isMarkdown = preview?.kind === 'markdown'
@@ -538,59 +650,46 @@ function previewControls(kit: Kit, model: PaneModel, closeLabel: string): Render
   return [
     ...(isScrollable
       ? [
-          <Button
-            key={KEYS.previewUp}
-            label="↑"
-            hotkey="k"
-            plain
-            dimColor
-            onPress={() => kit.actions.scrollPreview(-1)}
-          />,
-          <Button
-            key={KEYS.previewDown}
-            label="↓"
-            hotkey="j"
-            plain
-            dimColor
-            onPress={() => kit.actions.scrollPreview(1)}
-          />,
+          { key: KEYS.previewUp, hotkey: 'k', label: '↑', onPress: () => kit.actions.scrollPreview(-1) },
+          { key: KEYS.previewDown, hotkey: 'j', label: '↓', onPress: () => kit.actions.scrollPreview(1) },
         ]
       : []),
     ...(isMarkdown
       ? [
-          <Button
-            key={KEYS.previewMode}
-            label={markdownMode === 'rendered' ? 'source' : 'rendered'}
-            hotkey="m"
-            plain
-            dimColor
-            onPress={kit.actions.toggleMarkdownMode}
-          />,
+          {
+            key: KEYS.previewMode,
+            hotkey: 'm',
+            label: markdownMode === 'rendered' ? 'source' : 'rendered',
+            onPress: kit.actions.toggleMarkdownMode,
+          },
         ]
       : []),
-    <Button
-      key={KEYS.previewClose}
-      label={closeLabel}
-      hotkey="x"
-      plain
-      dimColor
-      onPress={kit.actions.closePreview}
-    />,
+    { key: KEYS.previewClose, hotkey: 'x', label: closeLabel, onPress: kit.actions.closePreview },
   ]
 }
 
-function previewMetaRow(kit: Kit, model: PaneModel): RenderElement {
+/**
+ * The row under the title rule: the file's facts, as rich as fits beside
+ * its controls, which keep the room for its size at least.
+ */
+function previewMetaRow(kit: Kit, model: PaneModel): Fitted {
   const { Box, Text } = kit.ui
+  const controls = previewControlsOf(kit, model, 'close')
+  const facts = metaTextsOf(model.preview, model.markdownMode)
+  const { legend, room } = fitRow(kit.columns, legendsOf(controls), cellWidth(facts.at(-1) ?? ''))
 
-  return (
-    <Box flexDirection="row" height={1} columnGap={1}>
-      <Text dimColor wrap="truncate-end">
-        {metaTextOf(model.preview, model.markdownMode)}
-      </Text>
-      <Box flexGrow={1} />
-      {previewControls(kit, model, 'close')}
-    </Box>
-  )
+  return {
+    row: (
+      <Box flexDirection="row" height={1} columnGap={1}>
+        <Text dimColor wrap="truncate-end">
+          {facts.find(text => cellWidth(text) <= room) ?? ''}
+        </Text>
+        <Box flexGrow={1} />
+        {legendItems(kit, legend, controls)}
+      </Box>
+    ),
+    hidden: notLabelledIn(controls, legend),
+  }
 }
 
 function previewRegion(kit: Kit, model: PaneModel): RenderElement {
