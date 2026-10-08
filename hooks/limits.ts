@@ -128,6 +128,19 @@ const Limits = {
    * Cells of a typed path a toast keeps; a longer one is cut in the middle.
    */
   TOAST_PATH_CELLS: 60,
+  /**
+   * Projects whose open folders the store keeps; past it the one saved
+   * longest ago is dropped. The store holds 4 MiB in all, shared with every
+   * other value the mod keeps there.
+   */
+  MAX_SAVED_PROJECTS: 50,
+  /**
+   * Characters of JSON one project's saved folders take at most, the
+   * shallowest folders kept first. With `MAX_SAVED_PROJECTS`, 800,000 in
+   * all: a fifth of the store in ASCII names, under 2.5 MiB even at three
+   * bytes a character.
+   */
+  MAX_SAVED_CHARS: 16_000,
 } as const
 
 export default Limits

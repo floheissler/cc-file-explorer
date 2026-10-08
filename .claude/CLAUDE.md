@@ -33,6 +33,9 @@ entry with `"source": "./"`). README.md has the user-facing behavior.
 - `hooks/poll.ts`: pure logic of the checks for outside changes (which
   folders, in what batches, which changed) and of which tool calls may have
   written, and what.
+- `hooks/saved.ts`: each project's open folders in `$.store` (through
+  `Host`): the store key, the budget, reading back what the store holds,
+  which projects to drop.
 - `hooks/tree.ts`, `levels.ts`, `layout.ts`, `preview.ts`, `text.ts`,
   `paths.ts`, `focus.ts`, `status.ts`, `reveal.ts`, `mention.ts`: pure
   logic. `levels.ts` holds the `e`/`c`/digit steps; `focus.ts` reads the
@@ -132,6 +135,26 @@ the module otherwise:
   which Claude Code keeps in `~/.claude/plugins/store/`. A live probe under
   the classic renderer (`CLAUDE_CODE_NO_FLICKER=0 claude`) sets it: delete
   the mod's store file afterwards.
+- Each project's open folders are saved in `$.store` under a key of their
+  own, `expanded:` and `rootIdOf(root)` (`rootOf`, under Windows `\`, then
+  `foldKey`): every session on the machine shares the store and a `get`
+  then `set` is not atomic, so one shared map would lose other projects'
+  writes. Every change to the whole tree's `expanded` goes through
+  `setExpanded` (the filtered tree's open folders are the module's, never
+  saved), which saves after the state write, one save at a time: a folder
+  press, the level keys, closing the filter onto a pick, `/tree <path>`. A
+  session's first `/tree` (the `expanded` state never written, `isSet`) and
+  `classic.SessionStart` after `/clear`, `/resume`, `/branch` restore them;
+  later opens keep the session's own. `command.run` restores before it
+  reveals, so a first `/tree <path>` opens the saved folders and the path's
+  too. At most `MAX_SAVED_PROJECTS` projects (the one saved longest ago is
+  dropped) and `MAX_SAVED_CHARS` of JSON each (shallowest folders first).
+  What the store holds is untrusted: `savedFoldersIn` keeps only entries
+  shaped as folder keys. Checked live on 2.1.294 (2026-10-08): a new
+  session, `/clear` with the pane open, `/reload-plugins` and a reopen. A
+  `--plugin-dir` copy keeps a store file of its own
+  (`file-explorer_inline-….json`), apart from the installed one's: delete it
+  after a probe.
 - Every drawn region is exactly as tall as `layout.ts` says, so the drawing fits
   the body: Up/Down then walk the controls, and the `ui.scroll` hook moves the
   tree's and the preview's own windows under a fixed header.

@@ -50,6 +50,23 @@ export function rootOf(root: string): string {
 }
 
 /**
+ * One spelling for every spelling of a root, so what is kept for a project
+ * is found again however a session spells its root: as `rootOf` hands it
+ * to `$.fs`, under Windows with `\` separators, and folded as its file
+ * system compares names (`foldKey`). An identity to compare and to key by,
+ * never a path to hand `$.fs`.
+ *
+ * @param root the session's project root, native
+ * @returns the root's identity
+ */
+export function rootIdOf(root: string): string {
+  const base = rootOf(root)
+  const style = styleOf(base)
+
+  return foldKey(style === 'win32' ? base.replaceAll('/', '\\') : base, style)
+}
+
+/**
  * The native path of a key, joined with the root's own separator.
  *
  * @param root the session's project root, native

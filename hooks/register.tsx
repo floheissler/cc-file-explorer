@@ -60,6 +60,7 @@ import {
 } from './poll'
 import { maxPreviewTop, previewHeightOf, sourceColumnsOf, type Preview } from './preview'
 import { findEntry, revealPathsOf, rowsRevealing } from './reveal'
+import { loadFolders, saveFolders } from './saved'
 import { NO_MARKS, treeMarksOf } from './status'
 import { messageOf, sanitize, truncateMiddle } from './text'
 import {
@@ -90,7 +91,8 @@ const COMMAND_NAME = 'tree'
 /**
  * The pane's state the drawing reads, held by the session: it survives a
  * reload of the module, a write redraws the pane, and `/clear`, `/resume`
- * and `/branch` reset it.
+ * and `/branch` reset it. The open folders are also saved for the project
+ * (saved.ts), and a session's first open and those resets start from them.
  */
 const EXPANDED = atom({ plugin: 'file-explorer', key: 'expanded' } as const, [])
 const SELECTED = atom({ plugin: 'file-explorer', key: 'selected' } as const, null)
@@ -163,6 +165,8 @@ function hostOf($: EngineInterface): Host {
     store: {
       get: key => $.store.get(key),
       set: (key, value) => $.store.set(key, value),
+      delete: key => $.store.delete(key),
+      keys: () => $.store.keys(),
     },
     state: {
       expanded: {
@@ -170,6 +174,9 @@ function hostOf($: EngineInterface): Host {
         set: async fn => {
           await update($, EXPANDED, fn)
         },
+        // The atom reads its default while unset, the plain reference nothing
+        isSet: async () =>
+          (await $.state.get({ plugin: 'file-explorer', key: 'expanded' })).value !== undefined,
       },
       selected: {
         get: () => read($, SELECTED),
@@ -644,6 +651,42 @@ export const register: Register = on => {
   }
 
   /**
+   * Saves of the open folders to the store, one at a time and in order, each
+   * saving the folders open when it runs: the last save leaves the store as
+   * the tree stands.
+   */
+  let saves: Promise<void> = Promise.resolve()
+
+  /**
+   * Opens or closes folders of the whole tree, and saves the folders then
+   * open for the project, so its next session opens the tree where this one
+   * left it. A filtered tree's own open folders are the module's, unsaved.
+   */
+  const setExpanded = async (host: Host, change: (paths: string[]) => string[]) => {
+    await host.state.expanded.set(change)
+
+    // A failed save keeps the one before it; the next change saves again
+    const save = saves
+      .then(async () => saveFolders(host, await host.state.expanded.get(), Date.now()))
+      .catch(() => undefined)
+
+    saves = save
+    await save
+  }
+
+  /**
+   * Opens the tree where the project's open folders were last saved, by
+   * this session or another; nothing saved leaves it as it is.
+   */
+  const restoreFolders = async (host: Host) => {
+    const saved = await loadFolders(host)
+
+    if (saved !== null) {
+      await host.state.expanded.set(() => saved)
+    }
+  }
+
+  /**
    * The tree a level step works on: the filtered tree while the filter holds
    * a query, its open folders kept here; else the whole tree, its open
    * folders kept in the session state.
@@ -659,7 +702,7 @@ export const register: Register = on => {
         expanded: new Set(await host.state.expanded.get()),
         read,
         open: async paths => {
-          await host.state.expanded.set(() => [...paths])
+          await setExpanded(host, () => [...paths])
         },
       }
     }
@@ -802,7 +845,7 @@ export const register: Register = on => {
 
     isFileShown = !isDir
     revealed = entry.path
-    await host.state.expanded.set(() => expanded)
+    await setExpanded(host, () => expanded)
     await host.state.treeTop.set(top => revealTopOf(rows, index, top, hasPreview))
   }
 
@@ -1189,7 +1232,7 @@ export const register: Register = on => {
     const folders = ancestorsOf(path)
 
     await readDirs(host, opened, folders.filter(dir => !opened.dirs.has(dir)))
-    await host.state.expanded.set(open => [...open, ...folders.filter(dir => !open.includes(dir))])
+    await setExpanded(host, open => [...open, ...folders.filter(dir => !open.includes(dir))])
 
     const rows = flattenTree(dir => opened.dirs.get(dir), new Set(await host.state.expanded.get()))
     const index = rows.findIndex(row => row.type === 'entry' && row.path === path)
@@ -1253,7 +1296,7 @@ export const register: Register = on => {
         return
       }
 
-      await host.state.expanded.set(paths =>
+      await setExpanded(host, paths =>
         paths.includes(path) ? paths.filter(open => open !== path) : [...paths, path],
       )
     },
@@ -1472,8 +1515,15 @@ export const register: Register = on => {
     return next(e)
   })
 
+  /**
+   * `/clear`, `/resume` and `/branch` start the session state over: what was
+   * read is forgotten, and the tree, open or not, opens again where the
+   * project's folders were saved. Left at its default, the next change would
+   * save the default over them.
+   */
   on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
     forget()
+    await restoreFolders(hostOf($)).catch(() => undefined)
 
     return next(e)
   }).catch(($, e, next) => next(e))
@@ -1492,6 +1542,12 @@ export const register: Register = on => {
       await $.ui.close({ id: PANE_ID })
 
       return {}
+    }
+
+    // A session's first open starts the tree where the project's folders
+    // were saved; later opens keep the folders this session left open
+    if (!(await host.state.expanded.isSet())) {
+      await restoreFolders(host).catch(() => undefined)
     }
 
     // A pane opens on the whole tree: a file shown inline, the help, or a
