@@ -1,7 +1,7 @@
 import Limits from './limits'
 import { extensionOf } from './paths'
 import { clamp } from './tree'
-import { expandTabs, formatBytes, sanitize, truncateEnd } from './text'
+import { clipChars, expandTabs, formatBytes, sanitize, truncateEnd } from './text'
 
 /**
  * A file as the preview shows it: Markdown or source lines, the rows of a
@@ -98,8 +98,8 @@ export function looksBinary(text: string): boolean {
 }
 
 /**
- * A text's lines as the preview draws them: tabs expanded, control
- * characters replaced, each cut at the line cap, no empty last line.
+ * A text's lines as the preview draws them: tabs expanded, sanitized, each
+ * capped at the line cap, no empty last line.
  *
  * @param text the text
  * @returns the lines
@@ -112,7 +112,7 @@ export function linesOf(text: string): string[] {
   }
 
   return lines.map(line =>
-    truncateEnd(sanitize(expandTabs(line)), Limits.MAX_LINE_CHARS),
+    clipChars(sanitize(expandTabs(line)), Limits.MAX_LINE_CHARS),
   )
 }
 
@@ -348,10 +348,11 @@ export function markdownWindowOf(
 }
 
 /**
- * One cell of a Markdown table: cut at the cell cap, its pipes escaped.
+ * One cell of a Markdown table: cut to the cell cap in terminal columns, its
+ * pipes escaped.
  */
 function tableCellOf(cell: string): string {
-  const cut = truncateEnd(cell, Limits.MAX_CELL_CHARS)
+  const cut = truncateEnd(cell, Limits.MAX_CELL_COLUMNS)
 
   return cut === '' ? ' ' : cut.replace(/\\/g, '\\\\').replace(/\|/g, '\\|')
 }

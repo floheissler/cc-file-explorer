@@ -14,7 +14,7 @@ import {
   tableWindowOf,
   type Preview,
 } from './preview'
-import { formatBytes, padEnd, plural, sanitize, truncateEnd, truncateMiddle } from './text'
+import { cellWidth, formatBytes, padEnd, plural, sanitize, truncateEnd, truncateMiddle } from './text'
 import { branchPrefixOf, type TreeRow, type TreeWindow } from './tree'
 
 /**
@@ -224,7 +224,7 @@ function headerRow(kit: Kit, model: PaneModel): RenderElement {
   const { Box, Text, Button } = kit.ui
   const helpLabel = model.helpShown ? 'back' : 'help'
   const controls = `e: expand c: collapse r: refresh h: ${helpLabel}`
-  const nameRoom = Math.max(4, kit.columns - controls.length - 2)
+  const nameRoom = Math.max(4, kit.columns - cellWidth(controls) - 2)
 
   return (
     <Box flexDirection="row" height={1} columnGap={1}>
@@ -287,7 +287,9 @@ function treeRegion(kit: Kit, model: PaneModel): RenderElement {
 
 /**
  * The branch lines before a row, cut from the left in a pane too narrow for
- * the whole depth, so a name always keeps a few cells.
+ * the whole depth, so a name always keeps a few cells. Every branch
+ * character (`│`, `├`, `└`, `─`, space) takes one cell and one UTF-16 unit,
+ * so lengths here are cells.
  */
 function branchOf(row: TreeRow, columns: number): string {
   const branch = branchPrefixOf(row)
@@ -311,11 +313,15 @@ function treeRow(kit: Kit, row: TreeRow, selected: string | null): RenderElement
 
     return (
       <Box flexDirection="row" height={1}>
-        <Text dimColor>{branch}</Text>
+        <Text dimColor wrap="truncate-start">
+          {branch}
+        </Text>
         {row.isError ? (
-          <Text color="error">{text}</Text>
+          <Text color="error" wrap="truncate-end">
+            {text}
+          </Text>
         ) : (
-          <Text dimColor italic>
+          <Text dimColor italic wrap="truncate-end">
             {text}
           </Text>
         )}
@@ -327,7 +333,7 @@ function treeRow(kit: Kit, row: TreeRow, selected: string | null): RenderElement
   const isSelected = row.path === selected
   const glyph = isDir ? (row.isExpanded ? '▾' : '▸') : isSelected ? '•' : ' '
   const lead = `${glyph} `
-  const name = truncateMiddle(sanitize(row.name), Math.max(1, room - lead.length))
+  const name = truncateMiddle(sanitize(row.name), Math.max(1, room - cellWidth(lead)))
   const label = padEnd(`${lead}${name}`, room)
 
   const onPress = isDir
@@ -336,7 +342,9 @@ function treeRow(kit: Kit, row: TreeRow, selected: string | null): RenderElement
 
   return (
     <Box flexDirection="row" height={1}>
-      <Text dimColor>{branch}</Text>
+      <Text dimColor wrap="truncate-start">
+        {branch}
+      </Text>
       <Button
         key={`${ROW_KEY_PREFIX}${row.path}`}
         label={label}
@@ -359,7 +367,9 @@ function previewTitleRow(kit: Kit, selected: string): RenderElement {
   return (
     <Box flexDirection="row" height={1}>
       <Text dimColor>{'── '}</Text>
-      <Text bold>{name}</Text>
+      <Text bold wrap="truncate-middle">
+        {name}
+      </Text>
       <Text dimColor wrap="truncate-end">{` ${'─'.repeat(kit.columns)}`}</Text>
     </Box>
   )

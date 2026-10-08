@@ -43,8 +43,8 @@ describe('linesOf', () => {
   })
 
   test('replaces control characters, so an escape sequence draws as text', async () => {
-    expect(linesOf('\u001b[31mred')).toEqual(['�[31mred'])
-    expect(sanitize('a\u0007b')).toBe('a�b')
+    expect(linesOf('\u001b[31mred')).toEqual(['\u241b[31mred'])
+    expect(sanitize('a\u0007b')).toBe('a\u2407b')
   })
 })
 

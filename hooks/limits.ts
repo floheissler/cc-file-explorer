@@ -23,9 +23,9 @@ const Limits = {
    */
   MAX_LINE_CHARS: 1_000,
   /**
-   * Characters kept of one cell of a CSV or TSV preview.
+   * Terminal columns kept of one cell of a CSV or TSV preview.
    */
-  MAX_CELL_CHARS: 32,
+  MAX_CELL_COLUMNS: 32,
   /**
    * Rows of a CSV or TSV file the preview parses.
    */

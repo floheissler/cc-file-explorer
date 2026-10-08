@@ -1,6 +1,8 @@
 import type { FsEntry, On, RenderNode } from 'claude-code'
 import { expect, test, type Engine } from 'claude-code/testing'
 
+import { cellWidth } from '../hooks/text'
+
 const ROOT = '/work'
 
 const entry = (name: string, kind: FsEntry['kind'], size = 0): FsEntry => ({
@@ -341,4 +343,35 @@ test('clipped regions keep their content at its natural height', async ($, on) =
   ).toBe(0)
 
   await ui.unmount()
+})
+
+test('rows of wide names fill the row exactly, in cells', async ($, on) => {
+  const names = [
+    '日本語.md',
+    '🚀launch.ts',
+    '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}family.txt',
+    'cafe\u0301.md',
+    'ｌｏｎｇ全角フォルダ名のファイル.txt',
+  ]
+
+  stubProject(on, { [ROOT]: names.map(name => entry(name, 'file', 2)) }, {})
+  await openTree($)
+
+  for (const bodyColumns of [24, 40]) {
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns } })
+    const drawn = await ui.drawn()
+
+    for (const name of names) {
+      // The row: its branch lines' Text, then the Button padded to the end
+      const path = pathTo(drawn, element => element.props?.key === `row:${name}`)
+      const [branch, button] = path.at(-2)?.children ?? []
+      const branchText = (branch as ElementData | undefined)?.children?.[0]
+      const label = (button as ElementData | undefined)?.props?.label
+
+      expect(typeof branchText === 'string' && typeof label === 'string').toBe(true)
+      expect(cellWidth(String(branchText)) + cellWidth(String(label))).toBe(bodyColumns - 1)
+    }
+
+    await ui.unmount()
+  }
 })

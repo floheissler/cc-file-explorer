@@ -72,6 +72,9 @@ Keys work while the pane has the keyboard: click it, or press Ctrl+X then Tab.
 - Every entry but `.git`, git-ignored ones (`node_modules/`, build output)
   included, as other file explorers show them.
 - Up to 2,000 entries per folder; a note counts the rest.
+- Names too long for the pane cut in the middle, measured in terminal columns
+  as Claude Code measures them: CJK and most emoji take two, accents none, and
+  a cut never splits a character.
 
 The tree and the open preview refresh shortly after Claude edits a file or
 runs a shell command. Press `r` after changes made outside the session.
@@ -81,12 +84,15 @@ runs a shell command. Press `r` after changes made outside the session.
 | File | Preview |
 | --- | --- |
 | `.md`, `.markdown`, `.mdx` | Rendered Markdown, or its source with `m` |
-| `.csv`, `.tsv` | A table under its header row; long cells are cut at 32 characters |
+| `.csv`, `.tsv` | A table under its header row; long cells are cut at 32 columns |
 | Any other text | Source with syntax colors by extension, and line numbers |
 | Binary, empty, over 2 MB | A notice in place of the text |
 
-File names and text are drawn with control characters replaced, so a file
-cannot send escape sequences to your terminal.
+File names and text are drawn safely: control characters show as their
+Control Pictures (an escape as `␛`, a tab in a name as `␉`), bidirectional
+controls and other unsafe characters as `�`, and long runs of combining marks
+are cut. A file cannot send escape sequences to your terminal or reorder a
+name.
 
 ## How it works
 
@@ -140,6 +146,12 @@ tsc -p .                            # type-check against this build's API
 `tsc` reads the types Claude Code lays in `.claude-plugin/types/` (ignored by
 git) when it loads the mod with `--plugin-dir`; start one such session after a
 Claude Code update to refresh them.
+
+`hooks/cell-widths.ts` is generated: `node scripts/cell-widths.mjs` rebuilds
+it from the Unicode Character Database with the width rules of Bun's
+`stringWidth`, which Claude Code lays text out with. Re-run it, with the
+versions in the script updated, when Claude Code moves to a Bun on a newer
+Unicode version.
 
 The version lives in `.claude-plugin/plugin.json` alone; bump it with every
 release, because users only receive a release whose version changed.
