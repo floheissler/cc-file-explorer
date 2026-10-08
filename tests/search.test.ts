@@ -160,9 +160,11 @@ describe('topShowingMatch', () => {
   test('keeps a table’s window while it shows the row under the table’s head', async () => {
     const table = previewOf('a.csv', 0, ['h', ...lines].join('\n'))
 
-    // 10 rows: the top border, the header and the rule, then 7 body rows
-    expect(topShowingMatch(table, 16, 10, { rows: 10, isSource: false })).toBe(10)
-    expect(topShowingMatch(table, 17, 10, { rows: 10, isSource: false })).toBe(15)
+    // 10 rows: the top border, the header and the rule, then 4 body rows
+    // with the rules between them
+    expect(topShowingMatch(table, 13, 10, { rows: 10, isSource: false })).toBe(10)
+    expect(topShowingMatch(table, 14, 10, { rows: 10, isSource: false })).toBe(12)
+    expect(topShowingMatch(table, 0, 0, { rows: 3, isSource: false })).toBe(0)
   })
 })
 

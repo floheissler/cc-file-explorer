@@ -30,6 +30,12 @@ const CONTEXT_LINES = 2
 const TABLE_HEAD_ROWS = 3
 
 /**
+ * The rows one body row of a drawn table takes: Claude Code rules off every
+ * row from the next (checked live on 2.1.294).
+ */
+const TABLE_ROW_ROWS = 2
+
+/**
  * A field's text as a query: null while it holds nothing but spaces. An
  * all-lowercase query matches any case; one with a capital letter matches
  * case exactly.
@@ -194,7 +200,9 @@ function rowsBetween(lines: readonly string[], from: number, to: number, columns
  */
 export function topShowingMatch(preview: Preview, line: number, top: number, fit: PreviewFit): number {
   if (preview.kind === 'table') {
-    const shown = Math.max(1, fit.rows - TABLE_HEAD_ROWS)
+    // The body rows whose own row the window draws, each but the last
+    // followed by its rule
+    const shown = Math.max(1, Math.floor((fit.rows - TABLE_HEAD_ROWS - 1) / TABLE_ROW_ROWS) + 1)
 
     if (line >= top && line < top + shown) {
       return top

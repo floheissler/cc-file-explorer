@@ -130,9 +130,11 @@ the module otherwise:
   the source loses that cell (`Drawn.textColumns`). The marks count rows as
   Claude Code wraps them: its `Code` draws through a native highlighter that
   returns one entry per drawn row, beside a gutter as wide as the window's
-  last line number plus 2 (read in 2.1.294's source), which `windowMarksOf`
-  takes from `sourceColumnsOf` of that line. A table bolds the current row's
-  matching cells in the Markdown the mod writes (`TableMark`); rendered
+  last line number plus 2 (read in 2.1.294's source), and wraps by
+  character, mid-word (checked live on 2.1.294); `windowMarksOf` takes the
+  cells from `sourceColumnsOf` of that line. A table bolds the current row's
+  matching cells in the Markdown the mod writes (`TableMark`), and takes two
+  rows per body row, as Claude Code rules off every row (checked live); rendered
   Markdown has no row a line maps to, so it scrolls to the match unmarked.
   Its field is re-keyed per Enter as the filter's is (`searchKeyOf`). Enter
   keeps the match and moves the ring onto `search-next`, so Enter steps on;
