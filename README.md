@@ -1,11 +1,26 @@
 # file-explorer
 
-A file explorer pane for Claude Code. `/tree` opens the project beside the
-conversation as a tree you expand and collapse in place, and previews the file
-you pick under it: Markdown rendered as Claude's replies are, CSV and TSV as
-tables, source and text files with syntax colors and line numbers. Markers
-beside the names show git's status of each file and the files Claude wrote
-this session.
+[![CI](https://github.com/floheissler/cc-file-explorer/actions/workflows/ci.yml/badge.svg)](https://github.com/floheissler/cc-file-explorer/actions/workflows/ci.yml)
+
+A file explorer pane for Claude Code. `/tree` opens your project beside the
+conversation, so you can browse it, preview files and hand them to Claude
+without leaving the session.
+
+<!-- Screenshot or short GIF of the docked pane goes here. -->
+
+- **Browse** the project as a tree you expand and collapse in place, with the
+  mouse or the keys.
+- **Preview** the file you pick: Markdown rendered as Claude's replies are,
+  CSV and TSV as tables, source with syntax colors and line numbers.
+- **See git's status** beside every name, and the files Claude wrote this
+  session.
+- **Filter** the tree by name (`f`), or **jump** to any path with
+  `/tree <path>`.
+- **Mention** the focused file or folder to Claude at the prompt's cursor
+  (`a`).
+- **Stay current**: Claude's edits and changes made outside Claude show within
+  seconds.
+- **Pick up where you left off**: each project's open folders are remembered.
 
 It is a [mod](https://code.claude.com/docs/en/plugins/mods/overview): a plugin
 of function hooks that draws in Claude Code's own interface, in the terminal
@@ -13,17 +28,48 @@ and in the Desktop app's Code tab.
 
 > **Status:** early (v0.1.0). Expect rough edges.
 
+## Requirements
+
+- **Claude Code v2.1.287 or later** in a terminal, or the Desktop app's Code
+  tab from v2.1.286: mods are on by default from those versions. Tested with
+  Claude Code 2.1.294. Mods are a young part of Claude Code and their API can
+  change between releases, so after a Claude Code update, update this mod
+  too.
+- **Fullscreen rendering is optional.** With it (`/tui fullscreen`), the pane
+  docks beside the conversation and the mouse works; without it, the pane
+  opens above the prompt and works from the keys. See [Use](#use).
+- **`git` on the `PATH`** for the status markers. Without it, the tree, the
+  preview and the filter still work.
+- The pane draws nowhere else: not in the VS Code extension's chat panel, a
+  WSL session in the Desktop app, or `claude -p`.
+
 ## Install
 
-At the Claude Code prompt in a terminal:
+At the Claude Code prompt in a terminal (v2.1.275 or later for this one-step
+form):
 
 ```text
 /plugin install file-explorer --marketplace floheissler/cc-file-explorer
 ```
 
-Answer `y` to add the marketplace, then pick a scope. This repository is its
-own marketplace, named `cc-file-explorer`, so `claude plugin update
-file-explorer@cc-file-explorer` fetches later releases.
+Claude Code asks you to confirm adding the marketplace, then shows the
+plugin's details: review what it adds and pick a scope. Or, in two steps from
+your shell:
+
+```sh
+claude plugin marketplace add floheissler/cc-file-explorer
+claude plugin install file-explorer@cc-file-explorer
+```
+
+A user-scope install from the terminal also shows in the Desktop app's Code
+tab. Like every mod, it runs with your permissions: [Privacy](#privacy) lists
+what it touches, and you can check that yourself before installing.
+
+This repository is its own marketplace, named `cc-file-explorer`. Marketplaces
+other than Anthropic's don't update on their own: run
+`claude plugin update file-explorer@cc-file-explorer` for a new release, or
+turn on auto-update for `cc-file-explorer` in `/plugin` under
+**Marketplaces**.
 
 To run it from a local checkout for one session instead:
 
@@ -231,6 +277,33 @@ controls and other unsafe characters as `�`, and long runs of combining marks
 are cut. A file cannot send escape sequences to your terminal or reorder a
 name.
 
+## Privacy
+
+file-explorer runs inside Claude Code on your machine, with your permissions,
+as every mod does. It only reads:
+
+- Files and folders, through Claude Code, to draw the tree and the preview.
+  What the pane shows stays in the pane: nothing reaches Claude unless you
+  send a prompt with a mention that `a` put there.
+- The prompt's draft, only when you press `a`, to set the mention off from
+  the words around the cursor.
+- Claude's `Write`, `Edit`, `NotebookEdit`, `Bash` and `PowerShell` calls, to
+  refresh the pane and mark the files Claude wrote. It passes them on
+  unchanged and never holds one.
+
+It makes no network requests, never calls a model, and writes no files of its
+own. The one program it starts is `git`, read-only (`status`, `ls-files`,
+`rev-parse`), with optional locks off so it never gets in the way of your own
+commits. Between sessions it keeps two things in the store Claude Code keeps
+for each plugin: whether its one-time fullscreen tip was shown, and the open
+folders of the 50 projects you changed most recently, as paths relative to
+each project.
+
+To check this before you install, clone the repository and run
+`claude plugin validate .`: it lists every event the mod handles and every
+call it makes, read from the source. [How it works](#how-it-works) explains
+each one.
+
 ## Platforms
 
 | Platform | Status |
@@ -238,9 +311,15 @@ name.
 | Linux, WSL2 | Tested with Claude Code 2.1.294 |
 | Windows | Smoke-tested on native Windows (2026-10-08). Drive roots (`C:\`), shares (`\\server\share`) and WSL's share (`\\wsl.localhost\…`) are covered by tests |
 | macOS | Not tested. Paths are POSIX, as on Linux, and composed and decomposed accents in names both draw |
+| Desktop app (Code tab) | Draws there from v2.1.286, per the mods docs; the tests mount the pane on its surface too |
 
-Known limits:
+## Known limits
 
+- It browses and previews; it does not create, rename, move or delete files.
+  Ask Claude, or use your editor.
+- Binary files, images and PDFs among them, show a notice instead of a
+  preview, as do files over 2 MB. A folder shows up to 2,000 entries, and a
+  note counts the rest.
 - A network share lists only when Claude Code started on that host, and
   `\\?\` paths are refused; both are the engine's rules for `$.fs`.
 - Symbolic links show as plain rows: a linked folder does not open and a
@@ -276,8 +355,8 @@ It calls `$.session.root`, `$.session.cwd`, `$.fs.list`, `$.fs.stat`,
 `$.prompt.read`, `$.prompt.fill`, `$.ui.open`, `$.ui.close`, `$.ui.panes`,
 `$.ui.resolve`, `$.ui.invalidate`, `$.ui.focus`, `$.ui.log`, `$.ui.toast`,
 `$.store.get`, `$.store.set`, `$.store.delete`, `$.store.keys` and its
-own `$.state`. It makes no network calls and writes no files of its own. The one process it starts is `git`,
-read-only, in the project: `git ls-files` for the filter's file list, and
+own `$.state`. It makes no network calls and writes no files of its own.
+The one process it starts is `git`, read-only, in the project: `git ls-files` for the filter's file list, and
 for the markers `git rev-parse
 --show-prefix --absolute-git-dir`, then `git status --porcelain=v1 -z
 --untracked-files=all --ignored=matching -- .`. Every run has
