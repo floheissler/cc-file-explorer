@@ -310,9 +310,9 @@ and the field's row counts the matches (`2/9`).
   two lines below the top.
 - A bar left of the source marks the matching lines: in the theme's warning
   color the match you are on, dim the others, on every row a wrapped line
-  takes. A table bolds the matching cells of the row you are on. Rendered
-  Markdown scrolls to the match and draws no bars; `m` shows its source with
-  them.
+  takes. A Markdown file shows its source while the search is open, so the
+  bars can mark it, and its rendered form again once the search closes. A
+  table bolds the matching cells of the row you are on.
 - The search stays open as the preview follows the focus to another file:
   it counts that file's matches, and `n` starts from its top. `g` again, or
   closing the preview, closes the search.

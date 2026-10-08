@@ -1229,8 +1229,10 @@ export const register: Register = on => {
       return null
     }
 
+    // The search shows Markdown as its source, where its marks have rows
     const isSource =
-      shown.kind === 'code' || (shown.kind === 'markdown' && (await host.state.markdownMode.get()) === 'source')
+      shown.kind === 'code' ||
+      (shown.kind === 'markdown' && (drawn.hasSearch || (await host.state.markdownMode.get()) === 'source'))
 
     const columns =
       shown.kind === 'code' || shown.kind === 'markdown'
@@ -2209,9 +2211,13 @@ export const register: Register = on => {
 
     const window = treeWindowOf(rows.length, treeTop, layout.treeRows)
 
+    // While the search shows, Markdown draws as its source, where the
+    // search's marks have rows; the mode kept for the project stays as it is
+    const shownMarkdownMode = hasSearch ? 'source' : markdownMode
+
     // A source preview gives the search's marks their cells while it shows
     const isSourceShown =
-      shownPreview?.kind === 'code' || (shownPreview?.kind === 'markdown' && markdownMode === 'source')
+      shownPreview?.kind === 'code' || (shownPreview?.kind === 'markdown' && shownMarkdownMode === 'source')
 
     const textColumns = Math.max(1, columns - (hasSearch && isSourceShown ? Limits.SEARCH_MARK_CELLS : 0))
 
@@ -2265,7 +2271,7 @@ export const register: Register = on => {
         preview: shownPreview,
         previewTop,
         isPinned,
-        markdownMode,
+        markdownMode: shownMarkdownMode,
         helpShown,
         filter,
         search,

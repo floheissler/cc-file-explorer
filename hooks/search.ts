@@ -177,8 +177,8 @@ function rowsBetween(lines: readonly string[], from: number, to: number, columns
 /**
  * The window's top that shows a match. A window that shows the match's line
  * whole stays; else the line lands a few lines below the top, as far as the
- * window scrolls. Rendered Markdown draws its lines at no known height, so
- * there the match's line tops the window.
+ * window scrolls. Markdown counts as source: the search shows it so, as
+ * rendered Markdown draws its lines at no height a line maps to.
  *
  * @param preview the previewed file
  * @param line the match's line (a table's body row)
@@ -199,10 +199,6 @@ export function topShowingMatch(preview: Preview, line: number, top: number, fit
 
   if (preview.kind !== 'code' && preview.kind !== 'markdown') {
     return top
-  }
-
-  if (!fit.isSource) {
-    return line
   }
 
   const { lines } = preview

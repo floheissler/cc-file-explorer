@@ -151,10 +151,11 @@ describe('topShowingMatch', () => {
     expect(topShowingMatch(wide, 4, 0, { rows: 7, isSource: true, columns: 10 })).toBe(0)
   })
 
-  test('tops rendered Markdown’s window with the match’s line', async () => {
+  test('places a Markdown match as source, the form the search shows it in', async () => {
     const markdown = previewOf('a.md', 0, lines.join('\n'))
 
-    expect(topShowingMatch(markdown, 15, 10, { rows: 10, isSource: false })).toBe(15)
+    expect(topShowingMatch(markdown, 15, 10, { rows: 10, isSource: true, columns: 40 })).toBe(10)
+    expect(topShowingMatch(markdown, 30, 10, { rows: 10, isSource: true, columns: 40 })).toBe(28)
   })
 
   test('keeps a table’s window while it shows the row under the table’s head', async () => {

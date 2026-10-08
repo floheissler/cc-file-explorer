@@ -152,6 +152,10 @@ export type PaneModel = {
    * Whether the preview keeps its file as the focus ring moves.
    */
   readonly isPinned: boolean
+  /**
+   * How a Markdown preview draws: the project's mode, or source while the
+   * in-file search shows.
+   */
   readonly markdownMode: MarkdownMode
   /**
    * Whether the help view stands in for the tree and the preview.
@@ -519,7 +523,7 @@ function helpSectionsOf(seat: Seat): readonly HelpSection[] {
       ['Esc', isInline && seat.isClassic ? 'close the search' : 'give the keyboard back to the prompt'],
     ],
     notes: [
-      'All lowercase matches any case; a capital letter matches case exactly. A bar left of the source marks the matching lines, the current one in color; a table bolds the current row’s matching cells. Rendered Markdown scrolls to the match: m shows the source and its bars.',
+      'All lowercase matches any case; a capital letter matches case exactly. A bar left of the source marks the matching lines, the current one in color; Markdown shows its source while the search is open; a table bolds the current row’s matching cells.',
     ],
   }
 
@@ -1086,7 +1090,8 @@ function previewControlsOf(
     ...(isSearchable(preview) || search !== null
       ? [{ key: KEYS.search, hotkey: 'g', label: search === null ? 'search' : 'clear', onPress: kit.actions.toggleSearch }]
       : []),
-    ...(isMarkdown
+    // The search shows Markdown as its source: m would change nothing drawn
+    ...(isMarkdown && search === null
       ? [
           {
             key: KEYS.previewMode,
