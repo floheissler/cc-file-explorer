@@ -3,7 +3,8 @@ import Limits from './limits'
 /**
  * How the pane's body is split, top to bottom: the header row, the filter's
  * row while it is shown, the tree, and while a file is previewed its head
- * (a blank row, its title rule and its meta row) and its text.
+ * (a blank row, its title rule, its meta row and the in-file search's row
+ * while it is shown) and its text.
  */
 export type PaneLayout = {
   readonly bodyRows: number
@@ -30,10 +31,23 @@ const HEADER_ROWS = 1
  */
 const FILTER_ROWS = 1
 /**
+ * The in-file search's row: its field, what it found and its steps.
+ */
+const SEARCH_ROWS = 1
+/**
  * A blank row setting the preview off from the tree, the rule that carries
  * the file's name, and the row of its size and controls.
  */
 const PREVIEW_HEAD_ROWS = 3
+
+/**
+ * The rows the pane shows while asked for: the filter's over the tree, the
+ * in-file search's over the previewed file.
+ */
+export type ShownRows = {
+  readonly hasFilter?: boolean
+  readonly hasSearch?: boolean
+}
 
 /**
  * The rows above the tree: the header, and the filter's row while shown.
@@ -46,11 +60,11 @@ const headRowsOf = (hasFilter: boolean) => HEADER_ROWS + (hasFilter ? FILTER_ROW
  *
  * @param bodyRows the rows the pane's body has
  * @param hasPreview whether a file is previewed
- * @param hasFilter whether the filter's row is shown above the tree
+ * @param shown the filter's and the search's rows shown
  * @returns the layout
  */
-export function paneLayoutOf(bodyRows: number, hasPreview: boolean, hasFilter = false): PaneLayout {
-  const treeRow = headRowsOf(hasFilter)
+export function paneLayoutOf(bodyRows: number, hasPreview: boolean, shown: ShownRows = {}): PaneLayout {
+  const treeRow = headRowsOf(shown.hasFilter === true)
   const rows = Math.max(treeRow + 1, bodyRows)
 
   if (!hasPreview) {
@@ -63,7 +77,8 @@ export function paneLayoutOf(bodyRows: number, hasPreview: boolean, hasFilter = 
     }
   }
 
-  const shared = Math.max(2, rows - treeRow - PREVIEW_HEAD_ROWS)
+  const previewHeadRows = PREVIEW_HEAD_ROWS + (shown.hasSearch === true ? SEARCH_ROWS : 0)
+  const shared = Math.max(2, rows - treeRow - previewHeadRows)
   const isRoomy = shared >= Limits.MIN_TREE_ROWS + Limits.MIN_PREVIEW_ROWS
 
   const treeRows = isRoomy
@@ -73,7 +88,7 @@ export function paneLayoutOf(bodyRows: number, hasPreview: boolean, hasFilter = 
       )
     : Math.max(1, Math.floor(shared / 2))
 
-  const previewRow = treeRow + treeRows + PREVIEW_HEAD_ROWS
+  const previewRow = treeRow + treeRows + previewHeadRows
 
   return {
     bodyRows: rows,
@@ -131,25 +146,29 @@ export function inlineViewOf(state: {
 
 /**
  * How an inline pane's body is split: its header (the tree's, or the file's
- * head row), the filter's row over the tree while shown, and the one view
- * under them, as tall as its content and at most what the room leaves. The
- * frame of an inline pane fits what is drawn, so a short tree takes few
- * rows. The help is drawn whole: taller than the room, Claude Code's window
- * over the pane scrolls it.
+ * head row), the filter's row over the tree or the search's over the file
+ * while shown, and the one view under them, as tall as its content and at
+ * most what the room leaves. The frame of an inline pane fits what is
+ * drawn, so a short tree takes few rows. The help is drawn whole: taller
+ * than the room, Claude Code's window over the pane scrolls it.
  *
  * @param bodyRows the most rows the pane may take
  * @param view the view shown
  * @param contentRows the rows the view's content would take
- * @param hasFilter whether the filter is shown; its row sits over the tree
+ * @param shown the filter's and the search's rows shown; each sits over
+ *   its own view
  * @returns the layout
  */
 export function inlineLayoutOf(
   bodyRows: number,
   view: InlineView,
   contentRows: number,
-  hasFilter = false,
+  shown: ShownRows = {},
 ): PaneLayout {
-  const headRows = headRowsOf(hasFilter && view === 'tree')
+  const headRows =
+    view === 'file'
+      ? HEADER_ROWS + (shown.hasSearch === true ? SEARCH_ROWS : 0)
+      : headRowsOf(shown.hasFilter === true && view === 'tree')
   const room = Math.max(1, bodyRows - headRows)
   const rows = Math.max(1, view === 'help' ? contentRows : Math.min(contentRows, room))
 
@@ -164,17 +183,22 @@ export function inlineLayoutOf(
 
 /**
  * Where closing an inline pane by hand (Esc, its close mark) takes it first:
- * from the file or the help back to the tree, from a filtered tree to the
- * whole tree; from the whole tree it closes.
+ * from a searched file to the file, from the file or the help back to the
+ * tree, from a filtered tree to the whole tree; from the whole tree it
+ * closes.
  *
  * @param view the view shown
- * @param hasFilter whether the filter is shown
+ * @param shown the filter's and the search's rows shown
  * @returns the step back, or null to close
  */
-export function escapeStepOf(view: InlineView, hasFilter = false): 'tree' | 'unfilter' | null {
+export function escapeStepOf(view: InlineView, shown: ShownRows = {}): 'unsearch' | 'tree' | 'unfilter' | null {
+  if (view === 'file' && shown.hasSearch === true) {
+    return 'unsearch'
+  }
+
   if (view !== 'tree') {
     return 'tree'
   }
 
-  return hasFilter ? 'unfilter' : null
+  return shown.hasFilter === true ? 'unfilter' : null
 }

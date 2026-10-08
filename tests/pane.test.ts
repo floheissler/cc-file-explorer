@@ -471,7 +471,11 @@ for (const surface of ['terminal', 'desktop'] as const) {
     // Pinned, it keeps its file as the ring moves, and says so
     await ui.press({ key: 'preview-pin' })
     expect(await ui.find({ key: 'preview-pin' })).toMatchObject({ props: { label: 'unpin', hotkey: 'p' } })
+
+    // The facts say so too, where the row has room for them beside its labels
+    await ui.redraw({ ...PANE.props, bodyColumns: 60 })
     expect(await ui.find({ type: 'Text', text: /· pinned$/ })).toBeDefined()
+    await ui.redraw(PANE.props)
     await $.ui.focus(ringOnto('row:README.md'))
     await settle(ui)
     expect(await previewedOf(ui)).toBe('src/main.ts')

@@ -13,9 +13,12 @@ import {
   codeWindowOf,
   lengthOf,
   markdownWindowOf,
+  sourceColumnsOf,
   tableWindowOf,
   type Preview,
+  type TableMark,
 } from './preview'
+import { isSearchable, matcherOf, windowMarksOf, type MatchMark, type SearchQuery } from './search'
 import {
   CHANGES_GLYPH,
   GIT_LETTERS,
@@ -78,6 +81,26 @@ export type PaneActions = {
    */
   submitFilter: (text: string) => Promise<void>
   /**
+   * Shows the in-file search and puts the keyboard in its field; shown,
+   * closes it.
+   */
+  toggleSearch: () => Promise<void>
+  /**
+   * The search's text changed: the preview moves to the first match once
+   * typing pauses.
+   */
+  typeSearch: (text: string) => Promise<void>
+  /**
+   * Enter in the search: the match found stays and the focus goes to the
+   * next-match control; with nothing typed, the search closes.
+   */
+  submitSearch: (text: string) => Promise<void>
+  /**
+   * Moves to the next matching line, or the one before, around the file's
+   * ends.
+   */
+  stepSearch: (direction: 1 | -1) => Promise<void>
+  /**
    * Puts an `@` mention of the focused row, else the previewed file, at the
    * prompt's cursor.
    */
@@ -138,6 +161,11 @@ export type PaneModel = {
    */
   readonly filter: FilterModel | null
   /**
+   * The in-file search's row over the preview, null while the search is not
+   * shown.
+   */
+  readonly search: SearchModel | null
+  /**
    * The row `a` mentioned, which takes the focus ring back as the pane takes
    * the keyboard again, until the ring lands anywhere; null for none.
    */
@@ -164,6 +192,41 @@ export type FilterModel = {
    * Whether nothing is typed: Enter then closes the filter.
    */
   readonly isBlank: boolean
+}
+
+/**
+ * The in-file search as drawn: its field, what the query found, and the
+ * matches the preview marks.
+ */
+export type SearchModel = {
+  /**
+   * The field's key, which moves on at each Enter (`searchKeyOf`).
+   */
+  readonly key: string
+  /**
+   * The text the field is drawn holding: the query as typed.
+   */
+  readonly value: string
+  /**
+   * What the query found (`4/9`, `9 matches`), `''` for a blank query.
+   */
+  readonly status: string
+  /**
+   * Whether nothing is typed: Enter then closes the search.
+   */
+  readonly isBlank: boolean
+  /**
+   * The query the marks follow, null while it is blank.
+   */
+  readonly query: SearchQuery | null
+  /**
+   * The matching lines (a table's body rows), counted from 0.
+   */
+  readonly matches: ReadonlySet<number>
+  /**
+   * The match the steps stand on, null for none.
+   */
+  readonly current: number | null
 }
 
 /**
@@ -210,10 +273,11 @@ const WRITTEN_TONE: Tone = { color: 'claude' }
 
 /**
  * The pane's tree: the header, then the help view, or the filter's row while
- * shown, the tree's window and while a file is selected its preview. Each
- * region is exactly as tall as the layout says, so the drawing fits the body
- * and the arrows walk the rows. The keys the header does not show sit in a
- * hidden box, which draws nothing and keeps their hotkeys armed.
+ * shown, the tree's window and while a file is selected its preview, under
+ * the in-file search's row while shown. Each region is exactly as tall as
+ * the layout says, so the drawing fits the body and the arrows walk the
+ * rows. The keys the rows do not show sit in a hidden box, which draws
+ * nothing and keeps their hotkeys armed.
  *
  * @param ui the surface's elements
  * @param actions what the controls do
@@ -230,14 +294,17 @@ export function paneView(
   const { Box } = ui
   const kit: Kit = { ui, actions, columns }
 
+  const search = model.search === null ? null : searchRow(kit, model.search)
+
   if (model.inlineView === 'file' && model.selected !== null) {
     const head = inlineFileHeadRow(kit, model, model.selected)
 
     return (
       <Box flexDirection="column" width={columns}>
         {head.row}
+        {search?.row}
         {previewRegion(kit, model)}
-        {hiddenKeys(kit, head.hidden)}
+        {hiddenKeys(kit, [...head.hidden, ...(search?.hidden ?? [])])}
       </Box>
     )
   }
@@ -277,8 +344,9 @@ export function paneView(
       <Box height={1} />
       {previewTitleRow(kit, model.selected)}
       {meta.row}
+      {search?.row}
       {previewRegion(kit, model)}
-      {hiddenKeys(kit, [...header.hidden, ...meta.hidden])}
+      {hiddenKeys(kit, [...header.hidden, ...meta.hidden, ...(search?.hidden ?? [])])}
     </Box>
   )
 }
@@ -416,6 +484,7 @@ function helpSectionsOf(seat: Seat): readonly HelpSection[] {
       ['0', 'close every folder'],
       ['r', 're-read the tree and the preview'],
       ['f', 'filter the tree by name as you type; again to clear'],
+      ['g', 'search the previewed file as you type; again to clear'],
       ['a', 'mention the focused row to Claude at the prompt (@path), else the previewed file'],
       ['w  s', 'scroll the preview up, down'],
       ['m', 'Markdown preview: rendered or source'],
@@ -441,6 +510,18 @@ function helpSectionsOf(seat: Seat): readonly HelpSection[] {
     ],
   }
 
+  const search: HelpSection = {
+    title: 'In-file search',
+    rows: [
+      ['Enter', 'keep the match and move the focus to next, where Enter steps on; with nothing typed, close'],
+      ['n  b', 'the next matching line, the one before, around the ends'],
+      ['Esc', isInline && seat.isClassic ? 'close the search' : 'give the keyboard back to the prompt'],
+    ],
+    notes: [
+      'All lowercase matches any case; a capital letter matches case exactly. A bar left of the source marks the matching lines, the current one in color; a table bolds the current row’s matching cells. Rendered Markdown scrolls to the match: m shows the source and its bars.',
+    ],
+  }
+
   const mouse: HelpSection = {
     title: 'Mouse',
     rows: [
@@ -453,6 +534,7 @@ function helpSectionsOf(seat: Seat): readonly HelpSection[] {
     return [
       keys,
       filter,
+      search,
       mouse,
       MARKERS,
       {
@@ -480,7 +562,7 @@ function helpSectionsOf(seat: Seat): readonly HelpSection[] {
     ],
   }
 
-  return seat.isClassic ? [keys, filter, MARKERS, pane] : [keys, filter, mouse, MARKERS, pane]
+  return seat.isClassic ? [keys, filter, search, MARKERS, pane] : [keys, filter, search, mouse, MARKERS, pane]
 }
 
 /**
@@ -674,6 +756,66 @@ function filterRow(kit: Kit, filter: FilterModel): RenderElement {
       )}
     </Box>
   )
+}
+
+const SEARCH_LABEL = 'search'
+
+/**
+ * The cells the search's field keeps to type in beside its label before
+ * its steps and what it found give way.
+ */
+const SEARCH_FIELD_FLOOR = 8
+
+/**
+ * The in-file search's row: its field, then what the query found while the
+ * field keeps its floor beside it, then the steps to the match before and
+ * the next, as many labelled as the field leaves room for, the next kept
+ * longest. A step not drawn keeps its hotkey in the hidden box.
+ *
+ * The field sits in a clipped box of exact width, as the filter's does.
+ */
+function searchRow(kit: Kit, search: SearchModel): Fitted {
+  const { Box, Text, Input } = kit.ui
+
+  const controls: readonly ActionControl[] =
+    search.matches.size === 0
+      ? []
+      : [
+          { key: KEYS.searchBack, hotkey: 'b', label: 'back', onPress: () => kit.actions.stepSearch(-1) },
+          { key: KEYS.searchNext, hotkey: 'n', label: 'next', onPress: () => kit.actions.stepSearch(1) },
+        ]
+
+  // The field is the row's one child before the legend, as wide as is left
+  const floor = cellWidth(`${SEARCH_LABEL}: `) + SEARCH_FIELD_FLOOR
+  const { legend, room } = fitRow(kit.columns, legendsOf(controls), floor, { fixedCells: 0, children: 0 })
+  const statusCells = cellWidth(search.status)
+  const showsStatus = statusCells > 0 && room - statusCells - 1 >= floor
+  const fieldCells = Math.max(1, showsStatus ? room - statusCells - 1 : room)
+
+  return {
+    row: (
+      <Box flexDirection="row" height={1} columnGap={1}>
+        <Box width={fieldCells} height={1} overflow="hidden" flexShrink={0}>
+          <Input
+            key={search.key}
+            label={SEARCH_LABEL}
+            placeholder="type to search the file"
+            value={search.value}
+            submitLabel={search.isBlank ? 'close' : 'go'}
+            onInput={kit.actions.typeSearch}
+            onSubmit={kit.actions.submitSearch}
+          />
+        </Box>
+        {showsStatus && (
+          <Text dimColor wrap="truncate-end">
+            {search.status}
+          </Text>
+        )}
+        {legendItems(kit, legend, controls)}
+      </Box>
+    ),
+    hidden: notLabelledIn(controls, legend),
+  }
 }
 
 function treeRegion(kit: Kit, model: PaneModel): RenderElement {
@@ -914,10 +1056,11 @@ function fileFactsOf(preview: Preview | null, markdownMode: MarkdownMode): strin
 }
 
 /**
- * The previewed file's controls: scroll it (when it has lines), switch a
- * Markdown file's form, pin it where the preview follows the focus ring
- * (docked), mention it where no header carries `a`, and close it, `x`
- * labelled for where it leads.
+ * The previewed file's controls: scroll it (when it has lines), search it
+ * (when it has text, or while the search is shown), switch a Markdown
+ * file's form, pin it where the preview follows the focus ring (docked),
+ * mention it where no header carries `a`, and close it, `x` labelled for
+ * where it leads.
  */
 function previewControlsOf(
   kit: Kit,
@@ -928,7 +1071,7 @@ function previewControlsOf(
     hasPin,
   }: { readonly closeLabel: string; readonly hasMention: boolean; readonly hasPin: boolean },
 ): readonly ActionControl[] {
-  const { preview, markdownMode, isPinned } = model
+  const { preview, markdownMode, isPinned, search } = model
   const isScrollable = preview !== null && lengthOf(preview) > 0
   const isMarkdown = preview?.kind === 'markdown'
 
@@ -938,6 +1081,9 @@ function previewControlsOf(
           { key: KEYS.previewUp, hotkey: 'w', label: '↑', onPress: () => kit.actions.scrollPreview(-1) },
           { key: KEYS.previewDown, hotkey: 's', label: '↓', onPress: () => kit.actions.scrollPreview(1) },
         ]
+      : []),
+    ...(isSearchable(preview) || search !== null
+      ? [{ key: KEYS.search, hotkey: 'g', label: search === null ? 'search' : 'clear', onPress: kit.actions.toggleSearch }]
       : []),
     ...(isMarkdown
       ? [
@@ -996,7 +1142,7 @@ function previewRegion(kit: Kit, model: PaneModel): RenderElement {
 }
 
 function previewBody(kit: Kit, model: PaneModel): RenderElement {
-  const { Text, Code, Markdown } = kit.ui
+  const { Text, Markdown } = kit.ui
   const { preview, previewTop, layout, markdownMode } = model
   const rows = layout.previewRows
 
@@ -1012,7 +1158,7 @@ function previewBody(kit: Kit, model: PaneModel): RenderElement {
         </Text>
       )
     case 'table':
-      return <Markdown text={tableWindowOf(preview.rows, previewTop, rows)} />
+      return <Markdown text={tableWindowOf(preview.rows, previewTop, rows, tableMarkOf(model.search))} />
     case 'markdown':
       if (markdownMode === 'rendered') {
         // Markdown can draw a line in less than a row (a joined paragraph),
@@ -1020,10 +1166,72 @@ function previewBody(kit: Kit, model: PaneModel): RenderElement {
         return <Markdown text={markdownWindowOf(preview.lines, previewTop, rows * 2)} />
       }
 
-      return codeOf(Code, preview.path, codeWindowOf(preview.lines, previewTop, rows), 'markdown')
+      return sourceOf(kit, model, preview.path, preview.lines, 'markdown')
     case 'code':
-      return codeOf(Code, preview.path, codeWindowOf(preview.lines, previewTop, rows))
+      return sourceOf(kit, model, preview.path, preview.lines)
   }
+}
+
+/**
+ * The search's mark on a table: the current match's row, its matching
+ * cells bold.
+ */
+function tableMarkOf(search: SearchModel | null): TableMark | undefined {
+  if (search === null || search.query === null || search.current === null) {
+    return undefined
+  }
+
+  return { row: search.current, isMatch: matcherOf(search.query) }
+}
+
+/**
+ * The glyph that marks a matching line's rows, left of the source.
+ */
+const MATCH_GLYPH = '▌'
+
+const MATCH_TONES: Readonly<Record<Exclude<MatchMark, null>, Tone>> = {
+  current: { color: 'warning' },
+  match: { dimColor: true },
+}
+
+/**
+ * A source preview's window. While the in-file search is shown, a column
+ * beside it marks every row of each matching line: the current match in
+ * color, the others dim. The source keeps the rest of the row and wraps as
+ * it draws alone; its rows are counted as Claude Code wraps them beside a
+ * gutter as wide as the window's last line number (`sourceColumnsOf`).
+ */
+function sourceOf(
+  kit: Kit,
+  model: PaneModel,
+  path: string,
+  lines: readonly string[],
+  language?: string,
+): RenderElement {
+  const { Box, Text, Code } = kit.ui
+  const { search, previewTop, layout } = model
+  const window = codeWindowOf(lines, previewTop, layout.previewRows)
+  const code = codeOf(Code, path, window, language)
+
+  if (search === null) {
+    return code
+  }
+
+  const lastLine = window.startLine + window.source.split('\n').length - 1
+  const codeCells = Math.max(1, kit.columns - Limits.SEARCH_MARK_CELLS)
+  const columns = sourceColumnsOf(lastLine, codeCells)
+  const marks = windowMarksOf(lines, window.startLine - 1, layout.previewRows, columns, search.matches, search.current)
+
+  return (
+    <Box flexDirection="row">
+      <Box flexDirection="column" width={Limits.SEARCH_MARK_CELLS} flexShrink={0}>
+        {marks.map(mark => (mark === null ? <Box height={1} /> : <Text {...MATCH_TONES[mark]}>{MATCH_GLYPH}</Text>))}
+      </Box>
+      <Box flexDirection="column" width={codeCells} flexShrink={0}>
+        {code}
+      </Box>
+    </Box>
+  )
 }
 
 function codeOf(

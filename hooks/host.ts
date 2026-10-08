@@ -43,6 +43,7 @@ export type PaneState = {
   readonly markdownMode: StateCell<MarkdownMode>
   readonly helpShown: StateCell<boolean>
   readonly filter: StateCell<string | null>
+  readonly search: StateCell<string | null>
   readonly written: StateCell<string[]>
 }
 

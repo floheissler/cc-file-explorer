@@ -53,6 +53,9 @@ export const KEYS = {
   previewMode: 'preview-mode',
   previewPin: 'preview-pin',
   previewClose: 'preview-close',
+  search: 'search',
+  searchBack: 'search-back',
+  searchNext: 'search-next',
 } as const
 
 /**
@@ -66,6 +69,17 @@ export const KEYS = {
  */
 export function filterKeyOf(submits: number): string {
   return `filter-field-${submits}`
+}
+
+/**
+ * The key of the in-file search's field, drawn anew under the next key each
+ * time Enter is pressed in it, as the filter's is (`filterKeyOf`).
+ *
+ * @param submits how many times Enter was pressed in the field
+ * @returns the key
+ */
+export function searchKeyOf(submits: number): string {
+  return `search-field-${submits}`
 }
 
 /**

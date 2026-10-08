@@ -108,6 +108,16 @@ const Limits = {
    */
   MAX_FILTER_MATCHES: 500,
   /**
+   * The quiet time after the last keystroke in the in-file search before
+   * the preview moves to the first match.
+   */
+  SEARCH_DEBOUNCE_MS: 150,
+  /**
+   * The cells the in-file search's marks take left of a source preview,
+   * while the search is shown.
+   */
+  SEARCH_MARK_CELLS: 1,
+  /**
    * How long one git call may run (the filter's file list, the markers'
    * status) before it is dropped: the filter walks the folders instead, and
    * the tree draws no git markers.
