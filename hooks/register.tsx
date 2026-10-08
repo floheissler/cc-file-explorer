@@ -48,7 +48,7 @@ import {
   TIP_SHOWN_KEY,
   WIDEN_TIP_TEXT,
 } from './names'
-import { ancestorsOf, foldKey, isSameKey, keyOf, rootLabelOf, styleOf } from './paths'
+import { ancestorsOf, foldKey, isAbsolute, isSameKey, keyOf, rootLabelOf, styleOf } from './paths'
 import {
   changedDirsOf,
   hasSucceeded,
@@ -58,8 +58,9 @@ import {
   writtenPathOf,
 } from './poll'
 import { maxPreviewTop, previewHeightOf, sourceColumnsOf, type Preview } from './preview'
+import { findEntry, revealPathsOf, rowsRevealing } from './reveal'
 import { NO_MARKS, treeMarksOf } from './status'
-import { messageOf } from './text'
+import { messageOf, sanitize, truncateMiddle } from './text'
 import {
   clamp,
   flattenTree,
@@ -67,6 +68,7 @@ import {
   maxTreeTop,
   topRevealing,
   treeWindowOf,
+  type Entry,
   type PathSet,
   type TreeRow,
 } from './tree'
@@ -269,6 +271,15 @@ export const register: Register = on => {
   let isFileShown = false
 
   /**
+   * The rows the pane's body had at its last drawing (docked, its height;
+   * inline, the most it may take), and the entry `/tree <path>` revealed,
+   * whose row takes the focus ring as the pane takes the keyboard until the
+   * person moves the ring. A pane opened afresh has neither yet.
+   */
+  let room: number | null = null
+  let revealed: string | null = null
+
+  /**
    * Whether this session was told once to widen a fullscreen terminal too
    * narrow to dock the pane.
    */
@@ -348,6 +359,8 @@ export const register: Register = on => {
     previewLoad = null
     previewStamp = null
     drawn = null
+    room = null
+    revealed = null
     dirLoads.clear()
     polling.cursor = 0
     dropFileList()
@@ -685,6 +698,123 @@ export const register: Register = on => {
     const { treeRows } = paneLayoutOf(layout.bodyRows, hasPreview, drawn.hasFilter)
 
     await host.state.treeTop.set(top => topRevealing(index, top, rows.length, treeRows))
+  }
+
+  /**
+   * The tree window's top that shows a row and its neighbors. On a pane
+   * drawn before, it moves as little as the focus ring moves it, under the
+   * layout the pane will have. On one opened afresh, whose height is not
+   * known until it draws, the row above it comes first, which shows the row
+   * in a tree of `MIN_TREE_ROWS` rows or more, the markers of the rows out
+   * of view included.
+   */
+  const revealTopOf = (rows: readonly TreeRow[], index: number, top: number, hasPreview: boolean): number => {
+    if (index < 0) {
+      return top
+    }
+
+    if (room === null) {
+      return Math.max(0, index - 1)
+    }
+
+    const { treeRows } =
+      seat.placement === 'inline' ? inlineLayoutOf(room, 'tree', rows.length) : paneLayoutOf(room, hasPreview)
+
+    return topRevealing(index, top, rows.length, treeRows)
+  }
+
+  /**
+   * Opens the tree onto an entry: the folders above it open, and a folder
+   * itself; a file is picked and previewed, inline in the tree's place. The
+   * window moves to the entry's row, the open folders above it read first so
+   * the row is drawn where the window expects it, and the row takes the
+   * focus ring as the pane takes the keyboard.
+   */
+  const showEntry = async (host: Host, opened: Listing, entry: Entry) => {
+    const isDir = entry.kind === 'dir'
+    const before = await host.state.expanded.get()
+    const opening = [...ancestorsOf(entry.path), ...(isDir ? [entry.path] : [])]
+    const expanded = [...before, ...opening.filter(dir => !before.includes(dir))]
+
+    if (isDir) {
+      await readDirs(host, opened, [entry.path])
+    }
+
+    const { rows, index } = await rowsRevealing(
+      dir => opened.dirs.get(dir),
+      new Set(expanded),
+      entry.path,
+      dirs => readDirs(host, opened, dirs),
+    )
+
+    if (!isDir && (await host.state.selected.get()) !== entry.path) {
+      await loadPreview(host, entry.path)
+      await host.state.previewTop.set(() => 0)
+      await host.state.selected.set(() => entry.path)
+    }
+
+    const hasPreview = (await host.state.selected.get()) !== null
+
+    isFileShown = !isDir
+    revealed = entry.path
+    await host.state.expanded.set(() => expanded)
+    await host.state.treeTop.set(top => revealTopOf(rows, index, top, hasPreview))
+  }
+
+  /**
+   * `/tree <path>`: shows the first of the paths the tree lists, each read
+   * afresh along the way, so an entry made a moment ago is found. The root
+   * itself shows the tree from its top. A path outside the project, or one
+   * the tree does not list, is said in a toast, the path as typed.
+   *
+   * An absolute path that spells the root another way, through a link above
+   * it (macOS's `/tmp` for `/private/tmp`), is placed by where it lands. A
+   * relative one counts from the root alone: `$.fs` would resolve it from
+   * the engine's working folder.
+   */
+  const reveal = async (host: Host, paths: readonly string[], typed: string) => {
+    const opened = await ensureListing(host)
+    const style = styleOf(opened.root)
+
+    const placed = async (path: string) =>
+      keyOf(opened.root, path) ??
+      (isAbsolute(path, style) ? await realKeyOf(host, opened.root, path) : null)
+
+    const readDir = async (dir: string) => {
+      await readDirs(host, opened, [dir])
+
+      return opened.dirs.get(dir)
+    }
+
+    let isOutside = true
+
+    for (const path of paths) {
+      const key = await placed(path)
+
+      if (key === null) {
+        continue
+      }
+
+      isOutside = false
+
+      if (key === '') {
+        await host.state.treeTop.set(() => 0)
+
+        return
+      }
+
+      const entry = await findEntry(key, style, readDir)
+
+      if (entry !== null) {
+        await showEntry(host, opened, entry)
+
+        return
+      }
+    }
+
+    const shown = truncateMiddle(sanitize(typed), Limits.TOAST_PATH_CELLS)
+
+    host.toast(`${isOutside ? 'Outside the project' : 'Not in the tree'}: ${shown}`)
   }
 
   const scrollTreeBy = async (host: Host, by: number) => {
@@ -1082,6 +1212,8 @@ export const register: Register = on => {
     },
 
     selectFile: async path => {
+      revealed = null
+
       // Inline, a file takes the tree's place; picked again, it shows again
       if (seat.placement === 'inline') {
         if ((await host.state.selected.get()) !== path) {
@@ -1159,6 +1291,9 @@ export const register: Register = on => {
     refresh: () => refresh(host),
 
     toggleFilter: async () => {
+      // The person turns to the filter: a revealed row no longer starts the ring
+      revealed = null
+
       if ((await host.state.filter.get()) !== null) {
         await closeFilter(host)
 
@@ -1231,6 +1366,7 @@ export const register: Register = on => {
       await $.command.register({
         name: 'tree',
         description: COMMAND_DESCRIPTION,
+        argumentHint: '[path]',
         immediate: true,
       })
     } catch (error) {
@@ -1256,30 +1392,58 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
+  /**
+   * `/tree` toggles the pane. `/tree <path>` opens it onto that file or
+   * folder, or reveals it in a pane already shown, which it never closes.
+   */
   on('command.run', { command: 'tree' }, async ($, e) => {
+    const host = hostOf($)
+    const paths = revealPathsOf(e.args)
     const pane = (await $.ui.panes()).find(open => open.id === PANE_ID)
+    const isShown = pane?.isShown === true
 
-    if (pane?.isShown === true) {
+    if (isShown && paths.length === 0) {
       await $.ui.close({ id: PANE_ID })
 
       return {}
     }
 
     // A pane opens on the whole tree: a file shown inline, the help, or a
-    // filter is left. Git is read beside the open, never before it: its
-    // markers follow
-    forget()
+    // filter is left. `/tree <path>` reveals in the whole tree too: a shown
+    // pane closes its filter as `f` does, and keeps what it read and git's
+    // markers, which its refreshes and polls keep fresh
+    if (!isShown) {
+      forget()
+    } else if ((await host.state.filter.get()) !== null) {
+      await closeFilter(host)
+    }
+
     lastFocused = undefined
     isFileShown = false
+    revealed = null
     await update($, HELP_SHOWN, () => false)
     await update($, FILTER, () => null)
-    void loadGit(hostOf($)).catch(() => undefined)
-    await ensureListing(hostOf($)).catch(() => undefined)
 
+    // Git is read beside the open, never before it: its markers follow
+    if (!isShown) {
+      void loadGit(host).catch(() => undefined)
+    }
+
+    await ensureListing(host).catch(() => undefined)
+
+    if (paths.length > 0) {
+      const typed = e.args.trim()
+
+      await reveal(host, paths, typed).catch(error =>
+        host.toast(`Can't show ${truncateMiddle(sanitize(typed), Limits.TOAST_PATH_CELLS)}: ${messageOf(error)}`),
+      )
+    }
+
+    host.invalidate()
     await $.ui.open(paneArgsOf(e.presentation?.isFullscreen === false))
-    startPolling(hostOf($))
+    startPolling(host)
 
-    const tip = await tipOf(hostOf($), e.presentation).catch(() => null)
+    const tip = await tipOf(host, e.presentation).catch(() => null)
 
     return tip === null ? {} : { text: tip }
   })
@@ -1354,6 +1518,7 @@ export const register: Register = on => {
     // and inline as the terminal is resized. Inline it shows one view, as
     // tall as its content.
     seat = { placement: e.props.placement, isClassic: e.viewport?.isFullscreen === false }
+    room = e.props.scroll.bodyRows
 
     // The cells across a row: the dock keeps a column clear at its edge
     const columns = Math.max(
@@ -1412,6 +1577,7 @@ export const register: Register = on => {
         window,
         layout,
         selected,
+        revealed,
         preview: shownPreview,
         previewTop,
         markdownMode,
@@ -1468,6 +1634,11 @@ export const register: Register = on => {
    * Buttons: it stops at the tree's last row and wraps from the other ends.
    */
   on('ui.focus', { requestId: 'file-explorer' }, async ($, e, next) => {
+    // The revealed row holds the ring's start until the person moves it
+    if (e.origin.kind === 'person') {
+      revealed = null
+    }
+
     const step = focusStepOf(e.element, lastFocused, focusOrder)
 
     if (step === 'stay') {
