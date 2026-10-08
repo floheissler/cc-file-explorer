@@ -111,7 +111,7 @@ export function paneView(
       <Box flexDirection="column" width={columns}>
         {headerRow(kit, model)}
         {helpRegion(kit, model.layout.bodyRows - 1)}
-        {hiddenKeys(kit, model)}
+        {hiddenKeys(kit)}
       </Box>
     )
   }
@@ -124,20 +124,18 @@ export function paneView(
       {model.selected !== null && previewTitleRow(kit, model.selected)}
       {model.selected !== null && previewMetaRow(kit, model)}
       {model.selected !== null && previewRegion(kit, model)}
-      {hiddenKeys(kit, model)}
+      {hiddenKeys(kit)}
     </Box>
   )
 }
 
 /**
- * The hotkeys listed in the help view but not in the header: the digits
- * that set the tree's depth, and while a file is previewed `j` and `k`. A
- * `display: 'none'` box draws nothing, and Claude Code still arms the
- * hotkeys of the Buttons in it (checked on 2.1.293).
+ * The digit hotkeys that set the tree's depth, listed in the help view but
+ * not in the header. A `display: 'none'` box draws nothing, and Claude Code
+ * still arms the hotkeys of the Buttons in it (checked on 2.1.293).
  */
-function hiddenKeys(kit: Kit, model: PaneModel): RenderElement {
+function hiddenKeys(kit: Kit): RenderElement {
   const { Box, Button } = kit.ui
-  const isScrollable = !model.helpShown && model.preview !== null && lengthOf(model.preview) > 0
 
   return (
     <Box display="none">
@@ -150,24 +148,6 @@ function hiddenKeys(kit: Kit, model: PaneModel): RenderElement {
           onPress={() => kit.actions.showDepth(levels)}
         />
       ))}
-      {isScrollable && (
-        <Button
-          key={KEYS.previewUp}
-          label="scroll up"
-          hotkey="k"
-          plain
-          onPress={() => kit.actions.scrollPreview(-1)}
-        />
-      )}
-      {isScrollable && (
-        <Button
-          key={KEYS.previewDown}
-          label="scroll down"
-          hotkey="j"
-          plain
-          onPress={() => kit.actions.scrollPreview(1)}
-        />
-      )}
     </Box>
   )
 }
@@ -400,14 +380,10 @@ function metaTextOf(preview: Preview | null, markdownMode: MarkdownMode): string
   }
 }
 
-/**
- * The preview's size and mode, and its two controls. They are bracketed
- * Buttons, which the terminal draws without their hotkey (`m`, `x`): the
- * header lists only the tree's keys, the help view the rest.
- */
 function previewMetaRow(kit: Kit, model: PaneModel): RenderElement {
   const { Box, Text, Button } = kit.ui
   const { preview, markdownMode } = model
+  const isScrollable = preview !== null && lengthOf(preview) > 0
   const isMarkdown = preview?.kind === 'markdown'
 
   return (
@@ -416,19 +392,41 @@ function previewMetaRow(kit: Kit, model: PaneModel): RenderElement {
         {metaTextOf(preview, markdownMode)}
       </Text>
       <Box flexGrow={1} />
+      {isScrollable && (
+        <Button
+          key={KEYS.previewUp}
+          label="↑"
+          hotkey="k"
+          plain
+          dimColor
+          onPress={() => kit.actions.scrollPreview(-1)}
+        />
+      )}
+      {isScrollable && (
+        <Button
+          key={KEYS.previewDown}
+          label="↓"
+          hotkey="j"
+          plain
+          dimColor
+          onPress={() => kit.actions.scrollPreview(1)}
+        />
+      )}
       {isMarkdown && (
         <Button
           key={KEYS.previewMode}
           label={markdownMode === 'rendered' ? 'source' : 'rendered'}
           hotkey="m"
+          plain
           dimColor
           onPress={kit.actions.toggleMarkdownMode}
         />
       )}
       <Button
         key={KEYS.previewClose}
-        label="✕"
+        label="close"
         hotkey="x"
+        plain
         dimColor
         onPress={kit.actions.closePreview}
       />

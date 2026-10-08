@@ -48,10 +48,10 @@ the module otherwise:
   `sanitize` before it is drawn.
 - Hotkeys are one lowercase letter or digit: the engine reads Shift+e as `e`,
   `?` cannot be one, and a mod cannot bind Ctrl or Alt chords of its own.
-  Keys the header does not list (the digits, `j`/`k`) are Buttons in a
+  The digit keys, listed only in the help view, are Buttons in a
   `display: 'none'` box, whose hotkeys stay armed (checked on 2.1.293; check
-  again after Claude Code updates). Bracketed Buttons (no `plain`) draw
-  without their hotkey letter in the terminal.
+  again after Claude Code updates). Never give two drawn Buttons one hotkey:
+  the later wins.
 - A tree row is a dim `Text` of branch lines (`branchPrefixOf`, from the
   `guides`/`isLast` that `flattenTree` computes) beside a `Button` keyed
   `row:<path>` for the glyph and name; the `ui.focus` hook relies on the key.

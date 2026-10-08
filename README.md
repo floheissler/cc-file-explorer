@@ -35,8 +35,9 @@ Run `/explorer` to open the pane, and again to close it. In fullscreen
 rendering (`/tui fullscreen`) the pane docks beside the transcript from 110
 columns; otherwise it opens above the prompt and Esc closes it.
 
-The header shows the tree's keys, `e: expand  c: collapse  r: refresh  h: help`;
-`h` opens a help view with all of them.
+The header shows the tree's keys, `e: expand  c: collapse  r: refresh  h: help`,
+and a previewed file's row its own, `k: ↑  j: ↓  m: source  x: close`; `h` opens
+a help view with all of them.
 
 | Do this | To |
 | --- | --- |
@@ -48,8 +49,8 @@ The header shows the tree's keys, `e: expand  c: collapse  r: refresh  h: help`;
 | `0` | Close every folder |
 | `r` | Re-read the tree and the previewed file |
 | `h` | Show or hide the help view |
-| Click the previewed file again, `[ ✕ ]`, or `x` | Close the preview |
-| `[ source ]` or `m` | Switch a Markdown preview between rendered and source |
+| Click the previewed file again, or press `x` | Close the preview |
+| `m` | Switch a Markdown preview between rendered and source |
 | Wheel over the tree or the preview | Scroll that part alone; the header stays put |
 | `j` / `k`, Page Up / Page Down | Scroll the preview |
 | Tab, Up, Down | Walk the tree; the tree scrolls with the focus |
