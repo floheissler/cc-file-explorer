@@ -346,9 +346,11 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.press({ key: 'preview-mode' })
     expect(await ui.find({ type: 'Code' })).toMatchObject({ props: { language: 'markdown' } })
 
-    // Source previews with line numbers, and `j` scrolls it
+    // Source previews with line numbers, and `s` scrolls it
     await ui.press({ key: 'row:src/main.ts' })
     expect(await ui.find({ type: 'Code' })).toMatchObject({ props: { startLine: 1 } })
+    expect(await ui.find({ key: 'preview-up' })).toMatchObject({ props: { hotkey: 'w' } })
+    expect(await ui.find({ key: 'preview-down' })).toMatchObject({ props: { hotkey: 's' } })
     await ui.press({ key: 'preview-down' })
     expect(await ui.find({ type: 'Code' })).toMatchObject({ props: { startLine: 4 } })
 
