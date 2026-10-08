@@ -23,7 +23,8 @@ const Limits = {
    */
   MAX_LINE_CHARS: 1_000,
   /**
-   * Terminal columns kept of one cell of a CSV or TSV preview.
+   * Terminal columns kept of one cell of a CSV or TSV preview at most;
+   * fewer where the table would be wider than the row.
    */
   MAX_CELL_COLUMNS: 32,
   /**

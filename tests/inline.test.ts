@@ -69,7 +69,15 @@ function projectOf(on: On, names: readonly string[]) {
   })
   on('fs.list', ($, e) => ({ value: testPathOf(e.path) === ROOT ? names.map(name => entry(name, 'file', 9)) : [] }))
   on('fs.stat', () => ({ value: { kind: 'file', size: 9, mtimeMs: 0, isLink: false } }))
-  on('fs.read', ($, e) => ({ value: testPathOf(e.path).endsWith('.md') ? '# Hello\n\nSome **text**\n' : 'const a = 1' }))
+  on('fs.read', ($, e) => {
+    const path = testPathOf(e.path)
+
+    if (path.endsWith('.csv')) {
+      return { value: 'name,note\nalpha,first\nbeta,second\ngamma,last\n' }
+    }
+
+    return { value: path.endsWith('.md') ? '# Hello\n\nSome **text**\n' : 'const a = 1' }
+  })
 
   return { pane, opens }
 }
@@ -140,6 +148,21 @@ describe('an inline pane', () => {
     await ui.press({ key: 'preview-close' })
     expect(await ui.find({ key: 'row:a.txt' })).toBeDefined()
     expect(await ui.find({ type: 'Markdown' })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('draws a table whole: its head, and each row with the rule under it', async ($, on) => {
+    projectOf(on, ['data.csv'])
+    await treeIn($, CLASSIC)
+
+    const ui = await $.ui.mount(INLINE)
+
+    await ui.press({ key: 'row:data.csv' })
+
+    // Its head row, then the border, the header, the rule and the 3 rows
+    // with a rule under each, the last's the bottom border
+    expect(regionHeightsOf(await ui.drawn())).toEqual([1, 9, undefined])
+    expect(String((await ui.find({ type: 'Markdown' }))?.props.text)).toContain('| gamma | last |')
     await ui.unmount()
   })
 

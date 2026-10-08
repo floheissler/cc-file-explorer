@@ -221,16 +221,10 @@ export function lengthOf(preview: Preview): number {
 }
 
 /**
- * Rows a drawn table takes beyond its body rows: its borders, header and
- * rule.
- */
-const TABLE_FRAME_ROWS = 4
-
-/**
  * The rows a preview takes drawn whole, as tall as an inline pane draws it:
  * source a row a line, Markdown about one (it wraps and joins lines), a
- * table its body and frame, a notice two for a wrapped line, and one while
- * the file is read.
+ * table its head and two a body row, a notice two for a wrapped line, and
+ * one while the file is read.
  *
  * @param preview the preview, or null while it is read
  * @returns the rows
@@ -244,7 +238,7 @@ export function previewHeightOf(preview: Preview | null): number {
     case 'notice':
       return 2
     case 'table':
-      return lengthOf(preview) + TABLE_FRAME_ROWS
+      return tableHeightOf(lengthOf(preview))
     case 'markdown':
     case 'code':
       return Math.max(1, lengthOf(preview))
@@ -432,11 +426,49 @@ export function markdownWindowOf(
 }
 
 /**
- * One cell of a Markdown table: cut to the cell cap in terminal columns, its
+ * The cells Claude Code draws a table column at the least, however short
+ * its cells (checked live on 2.1.294).
+ */
+const MIN_TABLE_CELL_COLUMNS = 3
+
+/**
+ * The cells a drawn table takes beyond its columns' text: a border before
+ * each column and after the last, and a space each side of every cell.
+ */
+const tableFrameCellsOf = (columnCount: number) => 3 * columnCount + 1
+
+/**
+ * The cell cap that fits a table to `columns` cells: the cell cap, or less,
+ * as much as every column cut to it leaves the table no wider than the row.
+ * Claude Code draws a table at its natural width and wraps a line wider
+ * than the row, which breaks the table's lines apart. A cap under a
+ * column's least width saves no cells, so a table too wide even at that
+ * keeps it, and wraps.
+ *
+ * @param widths each column's widest cell, in cells
+ * @param columns the cells across a row
+ * @returns the cap
+ */
+function tableCellCapOf(widths: readonly number[], columns: number): number {
+  const room = columns - tableFrameCellsOf(widths.length)
+  const widthAt = (cap: number) =>
+    widths.reduce((sum, width) => sum + Math.max(MIN_TABLE_CELL_COLUMNS, Math.min(width, cap)), 0)
+
+  let cap = Limits.MAX_CELL_COLUMNS
+
+  while (cap > MIN_TABLE_CELL_COLUMNS && widthAt(cap) > room) {
+    cap -= 1
+  }
+
+  return cap
+}
+
+/**
+ * One cell of a Markdown table: cut to the cap in terminal columns, its
  * pipes escaped; bold when marked, its asterisks escaped so they stay text.
  */
-function tableCellOf(cell: string, isBold = false): string {
-  const cut = truncateEnd(cell, Limits.MAX_CELL_COLUMNS)
+function tableCellOf(cell: string, cap: number, isBold = false): string {
+  const cut = truncateEnd(cell, cap)
 
   if (cut === '') {
     return ' '
@@ -445,6 +477,40 @@ function tableCellOf(cell: string, isBold = false): string {
   const escaped = cut.replace(/\\/g, '\\\\').replace(/\|/g, '\\|')
 
   return isBold ? `**${escaped.replace(/\*/g, '\\*')}**` : escaped
+}
+
+/**
+ * The rows a drawn table takes above its first body row: its top border,
+ * its header and the rule under it.
+ */
+export const TABLE_HEAD_ROWS = 3
+
+/**
+ * The rows one body row of a drawn table takes: the row, and the rule under
+ * it, or the bottom border under the last (checked live on 2.1.294).
+ */
+export const TABLE_ROW_ROWS = 2
+
+/**
+ * The rows a table of `count` body rows takes drawn whole; with none, its
+ * head and the bottom border.
+ *
+ * @param count the body rows
+ * @returns the rows
+ */
+export function tableHeightOf(count: number): number {
+  return TABLE_HEAD_ROWS + Math.max(1, TABLE_ROW_ROWS * count)
+}
+
+/**
+ * The body rows a window of `rows` rows draws whole under the table's head,
+ * at least one.
+ *
+ * @param rows the window's rows
+ * @returns the body rows
+ */
+export function tableRowsIn(rows: number): number {
+  return Math.max(1, Math.floor((rows - TABLE_HEAD_ROWS - 1) / TABLE_ROW_ROWS) + 1)
 }
 
 /**
@@ -458,32 +524,43 @@ export type TableMark = {
 
 /**
  * The Markdown table a CSV or TSV window from `top` draws: the header row,
- * then up to `count` rows from `top`, every row as wide as the widest; a
- * marked row's matching cells bold.
+ * then up to `count` rows from `top`, every row as wide as the widest, its
+ * cells cut so the table fits `columns` cells; a marked row's matching
+ * cells bold.
  */
 export function tableWindowOf(
   rows: readonly (readonly string[])[],
   top: number,
   count: number,
+  columns: number,
   mark?: TableMark,
 ): string {
   const head = rows[0] ?? []
   const body = rows.slice(1)
   const start = clamp(top, 0, Math.max(0, body.length - 1))
   const shown = body.slice(start, start + count)
-  const width = shown.reduce((widest, row) => Math.max(widest, row.length), Math.max(1, head.length))
+  const columnCount = shown.reduce((widest, row) => Math.max(widest, row.length), Math.max(1, head.length))
+
+  const widths = Array.from({ length: columnCount }, (_, at) =>
+    [head, ...shown].reduce(
+      (widest, cells) => Math.max(widest, cellWidth(truncateEnd(cells[at] ?? '', Limits.MAX_CELL_COLUMNS))),
+      0,
+    ),
+  )
+
+  const cap = tableCellCapOf(widths, columns)
 
   const lineOf = (cells: readonly string[], row: number | null = null) => {
     const isMarked = mark !== undefined && row === mark.row
 
-    return `| ${Array.from({ length: width }, (_, at) => {
+    return `| ${Array.from({ length: columnCount }, (_, at) => {
       const cell = cells[at] ?? ''
 
-      return tableCellOf(cell, isMarked && mark.isMatch(cell))
+      return tableCellOf(cell, cap, isMarked && mark.isMatch(cell))
     }).join(' | ')} |`
   }
 
-  const rule = `| ${Array.from({ length: width }, () => '---').join(' | ')} |`
+  const rule = `| ${Array.from({ length: columnCount }, () => '---').join(' | ')} |`
 
   return [lineOf(head), rule, ...shown.map((cells, at) => lineOf(cells, start + at))].join('\n')
 }

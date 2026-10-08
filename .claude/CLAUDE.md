@@ -133,8 +133,8 @@ the module otherwise:
   last line number plus 2 (read in 2.1.294's source), and wraps by
   character, mid-word (checked live on 2.1.294); `windowMarksOf` takes the
   cells from `sourceColumnsOf` of that line. A table bolds the current row's
-  matching cells in the Markdown the mod writes (`TableMark`), and takes two
-  rows per body row, as Claude Code rules off every row (checked live); rendered
+  matching cells in the Markdown the mod writes (`TableMark`), and places a
+  match by the table's rows (`tableRowsIn`, see the CSV bullet); rendered
   Markdown has no row a line maps to, so it scrolls to the match unmarked.
   Its field is re-keyed per Enter as the filter's is (`searchKeyOf`). Enter
   keeps the match and moves the ring onto `search-next`, so Enter steps on;
@@ -258,6 +258,16 @@ the module otherwise:
   fallback drawing.
 - Only the dock keeps `RIGHT_PAD_COLUMNS` clear; inline rows use the body's
   full width.
+- A CSV or TSV preview is a Markdown table the mod writes and Claude Code
+  draws (checked live on 2.1.294): a top border, the header and its rule
+  (`TABLE_HEAD_ROWS`), then two rows a body row, the row and the rule or
+  bottom border under it (`TABLE_ROW_ROWS`); with no body row, the head
+  and the bottom border. `tableHeightOf` sizes an inline table by that, and
+  `tableRowsIn` says which rows a window shows. Each column is as wide as
+  its widest cell, three cells at the least, with a space each side and a
+  border between; a line wider than the row wraps and breaks the table
+  apart, so `tableWindowOf` cuts the cells of the rows in view below
+  `MAX_CELL_COLUMNS` until the table fits the row, never below three.
 - A source preview wraps long lines, so its scroll end counts wrapped rows:
   `sourceColumnsOf` takes the gutter (a cell, the right-aligned digits, a
   cell, checked live on 2.1.294) from the row, and the search's marks
