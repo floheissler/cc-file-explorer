@@ -108,7 +108,9 @@ const Limits = {
    */
   MAX_FILTER_MATCHES: 500,
   /**
-   * How long a git call listing the project's files may run.
+   * How long one git call may run (the filter's file list, the markers'
+   * status) before it is dropped: the filter walks the folders instead, and
+   * the tree draws no git markers.
    */
   GIT_TIMEOUT_MS: 10_000,
   /**
@@ -117,6 +119,11 @@ const Limits = {
    */
   MAX_WALK_FOLDERS: 1_000,
   MAX_WALK_ENTRIES: 100_000,
+  /**
+   * Files Claude wrote this session that the tree marks; past it the
+   * earliest are forgotten.
+   */
+  MAX_WRITTEN_FILES: 1_000,
 } as const
 
 export default Limits

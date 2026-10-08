@@ -1,9 +1,10 @@
 import type { FsStat } from 'claude-code'
 
 import { gitFileListOf, type FileList, type FoundEntry } from './filter'
+import { runGit } from './git'
 import type { Host } from './host'
 import Limits from './limits'
-import { depthOf, joinPath, nativePathOf } from './paths'
+import { depthOf, joinPath, keyOf, nativePathOf, rootOf } from './paths'
 import { isKnownBinary, noticeOf, previewOf, type Preview } from './preview'
 import { formatBytes, messageOf } from './text'
 import { compareEntries, type DirListing, type Entry } from './tree'
@@ -36,12 +37,6 @@ export type PreviewRead = {
  * lists it. Everything else is, git-ignored entries included.
  */
 const GIT_DIR_NAME = '.git'
-
-/**
- * Set over the session's environment for every git call: a read never takes
- * a lock a commit running beside it needs, and git speaks plain C.
- */
-const GIT_ENV = { GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' }
 
 /**
  * Starts a listing at the session's project root, nothing read yet.
@@ -182,6 +177,26 @@ export async function fileStampOf(host: Host, root: string, path: string): Promi
 }
 
 /**
+ * The key of a path from outside the tree that its spelling does not place
+ * under the root (`keyOf`): where it lands, every link followed, under where
+ * the root lands, as `/tmp/p/x` lies under the root `/private/tmp/p`.
+ *
+ * @param host the engine's calls
+ * @param root the project root
+ * @param path the path, native
+ * @returns its key, or null where either does not resolve or it lands
+ *   outside the root
+ */
+export async function realKeyOf(host: Host, root: string, path: string): Promise<string | null> {
+  const [realRoot, realPath] = await Promise.all([
+    host.realPath(rootOf(root)).catch(() => undefined),
+    host.realPath(path).catch(() => undefined),
+  ])
+
+  return realRoot === undefined || realPath === undefined ? null : keyOf(realRoot, realPath)
+}
+
+/**
  * Reads the root and every open folder still in the tree, level by level, so
  * a folder that was removed or is now ignored is not read.
  *
@@ -293,17 +308,7 @@ export async function readFileList(host: Host, listing: Listing): Promise<FileLi
  *   tree, or git lists nothing (a root inside an ignored folder)
  */
 async function gitFileList(host: Host, root: string): Promise<FileList | null> {
-  const init = { cwd: nativePathOf(root, ''), env: GIT_ENV, timeoutMs: Limits.GIT_TIMEOUT_MS }
-
-  const git = async (args: readonly string[]) => {
-    try {
-      const run = await host.run(['git', ...args], init)
-
-      return run.exitCode === 0 ? run : null
-    } catch {
-      return null
-    }
-  }
+  const git = (args: readonly string[]) => runGit(host, root, args)
 
   const [listed, deleted, ignored] = await Promise.all([
     git(['ls-files', '-z', '--cached', '--others', '--exclude-standard']),

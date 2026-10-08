@@ -177,3 +177,120 @@ export function foldKey(key: string, style: PathStyle): string {
 
   return style === 'win32' ? composed.toLowerCase() : composed
 }
+
+/**
+ * Whether two keys name one entry, by `foldKey`.
+ *
+ * @param a a key
+ * @param b another key
+ * @param style the root's style
+ * @returns whether they fold alike
+ */
+export function isSameKey(a: string, b: string, style: PathStyle): boolean {
+  return foldKey(a, style) === foldKey(b, style)
+}
+
+/**
+ * A path split into the volume it starts from and its parts: `''` for the
+ * POSIX root, `C:` for a drive, `\\server\share` for a share; null for a
+ * relative path, which starts from the root it is read against.
+ */
+type SplitPath = {
+  readonly volume: string | null
+  readonly parts: readonly string[]
+}
+
+/**
+ * Splits a path in a style, or null for a spelling that names no place
+ * under a root on its own: a drive-relative `C:x`, a rooted `\x` with no
+ * drive, a device or namespace path (`\\.\`, `\\?\` but a drive or a
+ * share), or a share with no share name.
+ */
+function splitPath(path: string, style: PathStyle): SplitPath | null {
+  if (style === 'posix') {
+    return { volume: path.startsWith('/') ? '' : null, parts: path.split('/') }
+  }
+
+  const plain = path.replace(/^[\\/]{2}\?[\\/]UNC[\\/]/i, '\\\\').replace(/^[\\/]{2}\?[\\/](?=[A-Za-z]:)/, '')
+
+  if (/^[\\/]{2}[?.][\\/]/.test(plain)) {
+    return null
+  }
+
+  const drive = /^([A-Za-z]:)[\\/]/.exec(plain)
+
+  if (drive !== null) {
+    return { volume: drive[1] ?? '', parts: plain.slice(drive[0].length).split(/[\\/]/) }
+  }
+
+  if (/^[A-Za-z]:/.test(plain)) {
+    return null
+  }
+
+  const share = /^[\\/]{2}([^\\/]+)[\\/]+([^\\/]+)/.exec(plain)
+
+  if (share !== null) {
+    return { volume: `\\\\${share[1]}\\${share[2]}`, parts: plain.slice(share[0].length).split(/[\\/]/) }
+  }
+
+  if (/^[\\/]/.test(plain)) {
+    return null
+  }
+
+  return { volume: null, parts: plain.split(/[\\/]/) }
+}
+
+/**
+ * Parts with `.` and empty parts dropped and each `..` taking the part
+ * before it, as a path resolves: `..` at the volume's root stays there.
+ */
+function resolvedParts(parts: readonly string[]): string[] {
+  const resolved: string[] = []
+
+  for (const part of parts) {
+    if (part === '..') {
+      resolved.pop()
+    } else if (part !== '' && part !== '.') {
+      resolved.push(part)
+    }
+  }
+
+  return resolved
+}
+
+/**
+ * The key of a path from outside the tree: a tool's `file_path`, a path a
+ * person typed, git's view of the repository. Absolute, or relative to the
+ * root; read in the root's style, so either separator under Windows.
+ *
+ * The root's own parts are matched by `isSameKey`, so `c:\proj` finds
+ * `C:\Proj` and a decomposed name its composed twin; the parts below keep
+ * their spelling, to be matched against the tree's keys by `isSameKey`
+ * too. Spellings are compared, never resolved: a path through a link is
+ * not under the root it leads to (`$.fs.stat`'s `realPath` is).
+ *
+ * @param root the session's project root, native
+ * @param path the path
+ * @returns its key, `''` for the root itself, or null for a path outside
+ *   the root or one that names no place by its spelling (see `splitPath`)
+ */
+export function keyOf(root: string, path: string): string | null {
+  const style = styleOf(root)
+  const base = splitPath(rootOf(root), style)
+  const given = splitPath(path, style)
+
+  if (base === null || base.volume === null || given === null) {
+    return null
+  }
+
+  const volume = given.volume ?? base.volume
+  const rootParts = resolvedParts(base.parts)
+  const parts = resolvedParts(given.volume === null ? [...base.parts, ...given.parts] : given.parts)
+
+  const isUnderRoot =
+    isSameKey(volume, base.volume, style) &&
+    parts.length >= rootParts.length &&
+    rootParts.every((part, at) => isSameKey(part, parts[at] ?? '', style))
+
+  return isUnderRoot ? parts.slice(rootParts.length).join('/') : null
+}

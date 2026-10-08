@@ -8,7 +8,10 @@ import { cellWidth } from '../hooks/text'
  * on the terminal's elements.
  */
 
-type ElementData = {
+/**
+ * The plain-data shape of a drawn element.
+ */
+export type ElementData = {
   readonly type: string
   readonly props?: Readonly<Record<string, unknown>>
   readonly children?: readonly Node[]
@@ -178,6 +181,70 @@ export function overflowsOf(tree: Node, columns: number): string[] {
   visit(tree, false, null)
 
   return found
+}
+
+/**
+ * The elements from the root down to the first one `match` picks.
+ *
+ * @param node a drawn tree
+ * @param match picks the element
+ * @returns the elements, root first; none where nothing matches
+ */
+export function pathTo(node: Node, match: (element: ElementData) => boolean): ElementData[] {
+  if (typeof node !== 'object' || node === null) {
+    return []
+  }
+
+  const element = node as ElementData
+
+  if (match(element)) {
+    return [element]
+  }
+
+  for (const child of element.children ?? []) {
+    const below = pathTo(child, match)
+
+    if (below.length > 0) {
+      return [element, ...below]
+    }
+  }
+
+  return []
+}
+
+/**
+ * The Texts a tree row draws after its Button, its markers, as text: `''`
+ * for a row without markers.
+ *
+ * @param tree a drawn tree
+ * @param path the row's key
+ * @returns the markers' text, or undefined where no row has the key
+ */
+export function markersOf(tree: Node, path: string): string | undefined {
+  const row = pathTo(tree, element => element.props?.key === `row:${path}`).at(-2)
+
+  if (row === undefined) {
+    return undefined
+  }
+
+  const children = (row.children ?? []).filter((child): child is ElementData => typeof child === 'object' && child !== null)
+  const at = children.findIndex(child => child.type === 'Button')
+
+  return children.slice(at + 1).map(textOf).join('')
+}
+
+/**
+ * The cells a tree row takes across: its branch lines, its Button and its
+ * markers.
+ *
+ * @param tree a drawn tree
+ * @param path the row's key
+ * @returns the cells, or undefined where no row has the key
+ */
+export function rowWidthOf(tree: Node, path: string): number | undefined {
+  const row = pathTo(tree, element => element.props?.key === `row:${path}`).at(-2)
+
+  return row === undefined ? undefined : naturalWidthOf(row)
 }
 
 /**

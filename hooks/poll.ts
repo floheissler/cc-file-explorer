@@ -6,7 +6,7 @@ import type { TreeRow } from './tree'
 /**
  * How the pane notices changes on disk: the checks that look at the folders
  * it shows for changes made outside Claude, and which of Claude's tool calls
- * may have written.
+ * may have written, and what.
  */
 
 /**
@@ -101,4 +101,38 @@ export function mayHaveWritten(result: ToolCallResult | undefined): boolean {
   const settled: { readonly deny?: string; readonly isReadOnly?: boolean } = result
 
   return settled.deny === undefined && settled.isReadOnly !== true
+}
+
+/**
+ * The file a tool call writes by its input: Write's and Edit's `file_path`,
+ * NotebookEdit's `notebook_path`. A shell command's writes cannot be told
+ * from its text.
+ *
+ * @param input the call's input, its tool's name in `tool`
+ * @returns the path as the call names it, or null for another tool
+ */
+export function writtenPathOf(input: {
+  readonly tool: string
+  readonly file_path?: unknown
+  readonly notebook_path?: unknown
+}): string | null {
+  const path =
+    input.tool === 'NotebookEdit'
+      ? input.notebook_path
+      : input.tool === 'Write' || input.tool === 'Edit'
+        ? input.file_path
+        : undefined
+
+  return typeof path === 'string' && path !== '' ? path : null
+}
+
+/**
+ * Whether a tool call ran through: answered, neither denied nor an error,
+ * as an Edit whose text was not found is.
+ *
+ * @param result what the call resolved to, undefined when it threw
+ * @returns whether it did what it was asked
+ */
+export function hasSucceeded(result: ToolCallResult | undefined): boolean {
+  return result !== undefined && result.deny === undefined && result.isError !== true
 }

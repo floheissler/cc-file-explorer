@@ -1,6 +1,7 @@
-import type { FsEntry, On, RenderNode } from 'claude-code'
+import type { FsEntry, On } from 'claude-code'
 import { expect, mock, test, type Engine } from 'claude-code/testing'
 
+import { pathTo, type ElementData } from './drawn'
 import Limits from '../hooks/limits'
 import { cellWidth } from '../hooks/text'
 
@@ -181,9 +182,11 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.press({ key: 'depth-1' })
     expect(await ui.find({ key: 'row:src/main.ts' })).toBeDefined()
 
-    // `h` swaps the tree for the help view and back
+    // `h` swaps the tree for the help view and back; it lists the markers
     await ui.press({ key: 'help' })
     expect(await ui.find({ type: 'Text', text: 'Mouse' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'Markers' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'ignored by git' })).toBeDefined()
     expect(await ui.find({ key: 'row:src' })).toBeUndefined()
     await ui.press({ key: 'help' })
     expect(await ui.find({ key: 'row:src' })).toBeDefined()
@@ -286,40 +289,6 @@ test('a wheel tick moves the tree by the rows it carries', async ($, on) => {
 
   await ui.unmount()
 })
-
-/**
- * The plain-data shape of a drawn element, as far as the walk below reads it.
- */
-type ElementData = {
-  readonly type: string
-  readonly props?: Readonly<Record<string, unknown>>
-  readonly children?: readonly RenderNode[]
-}
-
-/**
- * The elements from the root down to the first one `match` picks.
- */
-function pathTo(node: RenderNode, match: (element: ElementData) => boolean): ElementData[] {
-  if (typeof node === 'string') {
-    return []
-  }
-
-  const element = node as ElementData
-
-  if (match(element)) {
-    return [element]
-  }
-
-  for (const child of element.children ?? []) {
-    const below = pathTo(child, match)
-
-    if (below.length > 0) {
-      return [element, ...below]
-    }
-  }
-
-  return []
-}
 
 test('clipped regions keep their content at its natural height', async ($, on) => {
   stubProject(on, FOLDERS, FILES)

@@ -33,6 +33,11 @@ declare module 'claude-code' {
        * query shows the whole tree under the filter's row.
        */
       filter: string | null
+      /**
+       * The files Claude wrote this session (Write, Edit, NotebookEdit), as
+       * paths relative to the project root, the latest last.
+       */
+      written: string[]
     }
   }
 }
