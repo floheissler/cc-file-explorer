@@ -1,5 +1,5 @@
 import type { FsEntry, On } from 'claude-code'
-import { describe, expect, mock, test, type Engine } from 'claude-code/testing'
+import { describe, expect, mock, test, type Engine, type Mounted } from 'claude-code/testing'
 
 import { testPathOf } from './host'
 import Limits from '../hooks/limits'
@@ -8,9 +8,10 @@ import {
   cappedFolders,
   droppedKeysOf,
   savedAtIn,
-  savedFoldersIn,
   savedKeyOf,
   savedRecordOf,
+  savedViewIn,
+  type SavedView,
 } from '../hooks/saved'
 
 const ROOT = '/work'
@@ -33,6 +34,15 @@ const FOLDERS: Record<string, FsEntry[]> = {
   [`${ROOT}/src`]: [entry('lib', 'dir'), entry('main.ts', 'file', 7)],
   [`${ROOT}/src/lib`]: [entry('util.ts', 'file', 7)],
 }
+
+/**
+ * The project's files, by absolute path: any other path is missing.
+ */
+const FILES = new Set(
+  Object.entries(FOLDERS).flatMap(([dir, entries]) =>
+    entries.filter(each => each.kind === 'file').map(each => `${dir}/${each.name}`),
+  ),
+)
 
 const PANE = {
   plugin: 'file-explorer',
@@ -84,13 +94,45 @@ function projectOf(on: On, root: string = ROOT) {
     return { value: undefined }
   })
   on('fs.list', ($, e) => ({ value: FOLDERS[testPathOf(e.path)] ?? [] }))
-  on('fs.stat', ($, e) => ({
-    value: { kind: testPathOf(e.path) in FOLDERS ? 'dir' : 'file', size: 7, mtimeMs: 0, isLink: false },
-  }))
+  on('fs.stat', ($, e) => {
+    const path = testPathOf(e.path)
+
+    if (!(path in FOLDERS) && !FILES.has(path)) {
+      throw new Error(`ENOENT: no such file or directory, stat '${path}'`)
+    }
+
+    return { value: { kind: path in FOLDERS ? 'dir' : 'file', size: 7, mtimeMs: 0, isLink: false } }
+  })
   on('fs.read', () => ({ value: 'content' }))
 
   return pane
 }
+
+/**
+ * Waits until `isDone` holds, a drawing at a time: the pane reads a restored
+ * preview's file as it draws.
+ */
+async function until(
+  ui: { readonly find: Mounted['find']; readonly redraw: () => Promise<void> },
+  isDone: () => Promise<boolean>,
+  what: string,
+): Promise<void> {
+  for (let turn = 0; turn < 100; turn += 1) {
+    if (await isDone()) {
+      return
+    }
+
+    await ui.redraw()
+  }
+
+  throw new Error(`waited too long for ${what}`)
+}
+
+/**
+ * The view saved under a key, as the store holds it.
+ */
+const viewIn = (store: Map<string, unknown>, key: string = KEY) =>
+  store.get(key) as Partial<SavedView & { savedAt: number }> | undefined
 
 /**
  * The store in memory, as `mock.store` keeps it but handed back: the test
@@ -115,8 +157,7 @@ function storeOf(on: On, entries: Readonly<Record<string, unknown>> = {}): Map<s
   return saved
 }
 
-const foldersIn = (store: Map<string, unknown>, key: string = KEY) =>
-  (store.get(key) as { expanded?: unknown } | undefined)?.expanded
+const foldersIn = (store: Map<string, unknown>, key: string = KEY) => viewIn(store, key)?.expanded
 
 describe('savedKeyOf', () => {
   test('one key for every spelling of a root', async () => {
@@ -155,39 +196,103 @@ describe('cappedFolders', () => {
 })
 
 describe('savedRecordOf', () => {
-  test('saves the folders and the time', async () => {
-    expect(savedRecordOf(['src', 'src/lib'], 1234)).toEqual({ expanded: ['src', 'src/lib'], savedAt: 1234 })
+  const view: SavedView = {
+    expanded: ['src', 'src/lib'],
+    selected: 'src/main.ts',
+    pinned: true,
+    markdownMode: 'source',
+  }
+
+  test('saves the folders, the preview’s file, pin and Markdown mode, and the time', async () => {
+    expect(savedRecordOf(view, 1234)).toEqual({ ...view, savedAt: 1234 })
+  })
+
+  test('a closed preview saves no pin', async () => {
+    expect(savedRecordOf({ ...view, selected: null }, 1)).toMatchObject({ selected: null, pinned: false })
   })
 
   test('stays within MAX_SAVED_CHARS however many folders are open', async () => {
     const open = Array.from({ length: 2_000 }, (_, at) => `folder-${String(at).padStart(4, '0')}/inner`)
-    const record = savedRecordOf(open, 0)
+    const record = savedRecordOf({ ...view, expanded: open }, 0)
 
-    expect(JSON.stringify(record.expanded).length).toBeLessThanOrEqual(Limits.MAX_SAVED_CHARS)
+    expect(JSON.stringify(record.expanded).length + JSON.stringify(record.selected).length).toBeLessThanOrEqual(
+      Limits.MAX_SAVED_CHARS,
+    )
     expect(record.expanded.length).toBeGreaterThan(0)
+    expect(record.selected).toBe('src/main.ts')
+  })
+
+  test('the file takes its share of the budget first', async () => {
+    // The file's JSON leaves room for ["a"] and no more
+    const selected = `${'f'.repeat(Limits.MAX_SAVED_CHARS - '["a"]'.length - '""'.length)}`
+    const record = savedRecordOf({ ...view, expanded: ['a', 'b'], selected }, 0)
+
+    expect(record.selected).toBe(selected)
+    expect(record.expanded).toEqual(['a'])
+
+    // A file past the budget alone is not saved, nor its pin
+    const longer = savedRecordOf({ ...view, expanded: ['a'], selected: 'f'.repeat(Limits.MAX_SAVED_CHARS) }, 0)
+
+    expect(longer).toMatchObject({ expanded: ['a'], selected: null, pinned: false })
   })
 })
 
-describe('savedFoldersIn', () => {
-  test('reads the folders of a saved record', async () => {
-    expect(savedFoldersIn({ expanded: ['src', 'src/lib'], savedAt: 1 })).toEqual(['src', 'src/lib'])
+describe('savedViewIn', () => {
+  test('reads the view of a saved record', async () => {
+    const stored = { expanded: ['src', 'src/lib'], selected: 'src/main.ts', pinned: true, markdownMode: 'source', savedAt: 1 }
+
+    expect(savedViewIn(stored, ROOT)).toEqual({
+      expanded: ['src', 'src/lib'],
+      selected: 'src/main.ts',
+      pinned: true,
+      markdownMode: 'source',
+    })
+  })
+
+  test('a record of folders alone, as older versions saved, opens no preview', async () => {
+    expect(savedViewIn({ expanded: ['src'], savedAt: 1 }, ROOT)).toEqual({
+      expanded: ['src'],
+      selected: null,
+      pinned: false,
+      markdownMode: 'rendered',
+    })
   })
 
   test('a value that is no record of folders holds none', async () => {
-    expect([undefined, null, 'src', ['src'], { expanded: 'src' }, {}].map(savedFoldersIn)).toEqual([
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-    ])
+    const values = [undefined, null, 'src', ['src'], { expanded: 'src' }, {}, { selected: 'README.md' }]
+
+    expect(values.map(value => savedViewIn(value, ROOT))).toEqual(values.map(() => null))
   })
 
   test('leaves out entries that cannot be folder keys', async () => {
     const stored = { expanded: ['src', 7, '', '/abs', 'a//b', '../up', 'a/./b', 'trail/', 'docs'], savedAt: 1 }
 
-    expect(savedFoldersIn(stored)).toEqual(['src', 'docs'])
+    expect(savedViewIn(stored, ROOT)?.expanded).toEqual(['src', 'docs'])
+  })
+
+  test('previews no file that cannot be one under the root, and drops its pin', async () => {
+    const read = (selected: unknown, root: string = ROOT) =>
+      savedViewIn({ expanded: [], selected, pinned: true }, root)
+
+    for (const selected of [7, '', '/etc/passwd', '../up.txt', 'a//b', 'trail/']) {
+      expect(read(selected)).toMatchObject({ selected: null, pinned: false })
+    }
+
+    // Under Windows, `\` separates: a key that climbs out by it is refused
+    expect(read('..\\secret.txt', 'C:\\Proj')).toMatchObject({ selected: null, pinned: false })
+    expect(read('src\\..\\..\\secret.txt', 'C:\\Proj')).toMatchObject({ selected: null })
+    expect(read('src/main.ts', 'C:\\Proj')).toMatchObject({ selected: 'src/main.ts', pinned: true })
+
+    // On POSIX, `\` is part of a name
+    expect(read('odd\\name.txt')).toMatchObject({ selected: 'odd\\name.txt', pinned: true })
+  })
+
+  test('a pin without a file, or a pin or mode of another type, reads as the default', async () => {
+    expect(savedViewIn({ expanded: [], selected: null, pinned: true }, ROOT)).toMatchObject({ pinned: false })
+    expect(savedViewIn({ expanded: [], selected: 'README.md', pinned: 'yes' }, ROOT)).toMatchObject({
+      pinned: false,
+    })
+    expect(savedViewIn({ expanded: [], markdownMode: 'raw' }, ROOT)).toMatchObject({ markdownMode: 'rendered' })
   })
 })
 
@@ -423,6 +528,110 @@ describe('the open folders, kept per project', () => {
     expect(await ui.find({ key: 'row:src/main.ts' })).toBeDefined()
     await ui.press({ key: 'row:src' })
     expect(await ui.find({ key: 'row:src/main.ts' })).toBeUndefined()
+
+    await ui.unmount()
+  })
+})
+
+describe('the preview, kept per project', () => {
+  test('every change of its file, pin and Markdown mode saves them', async ($, on) => {
+    const store = storeOf(on)
+    projectOf(on)
+    await tree($)
+
+    const ui = await $.ui.mount(PANE)
+
+    await ui.press({ key: 'row:README.md' })
+    expect(viewIn(store)).toMatchObject({ selected: 'README.md', pinned: false, markdownMode: 'rendered' })
+
+    await ui.press({ key: 'preview-pin' })
+    expect(viewIn(store)).toMatchObject({ selected: 'README.md', pinned: true })
+
+    await ui.press({ key: 'preview-mode' })
+    expect(viewIn(store)).toMatchObject({ markdownMode: 'source' })
+
+    // Closing the preview lets go of its pin; the mode stays
+    await ui.press({ key: 'preview-close' })
+    expect(viewIn(store)).toMatchObject({ selected: null, pinned: false, markdownMode: 'source' })
+
+    await ui.unmount()
+  })
+
+  test('a new session opens the preview where the project’s last one left it', async ($, on) => {
+    mock.store(on, {
+      [KEY]: { expanded: ['docs'], selected: 'docs/guide.md', pinned: true, markdownMode: 'source', savedAt: 1 },
+    })
+    projectOf(on)
+    await tree($)
+
+    const ui = await $.ui.mount(PANE)
+
+    // The file as source, pinned, its row in the tree
+    await until(ui, async () => (await ui.find({ type: 'Code' })) !== undefined, 'the saved file')
+    expect(await ui.find({ type: 'Code' })).toMatchObject({ props: { language: 'markdown' } })
+    expect(await ui.find({ type: 'Text', text: 'guide.md' })).toBeDefined()
+    expect(await ui.find({ key: 'preview-pin' })).toMatchObject({ props: { label: 'unpin' } })
+    expect(await ui.find({ key: 'row:docs/guide.md' })).toBeDefined()
+
+    await ui.unmount()
+  })
+
+  test('a saved file that is gone opens no preview, nor its pin', async ($, on) => {
+    const store = storeOf(on, {
+      [KEY]: { expanded: ['src'], selected: 'src/gone.ts', pinned: true, markdownMode: 'rendered', savedAt: 1 },
+    })
+    projectOf(on)
+    await tree($)
+
+    const ui = await $.ui.mount(PANE)
+
+    expect(await ui.find({ key: 'row:src/main.ts' })).toBeDefined()
+    expect(await ui.find({ key: 'preview-close' })).toBeUndefined()
+
+    // A file picked then pins no more
+    await ui.press({ key: 'row:src/main.ts' })
+    expect(viewIn(store)).toMatchObject({ selected: 'src/main.ts', pinned: false })
+
+    await ui.unmount()
+  })
+
+  test('later opens keep this session’s preview, though its first found nothing saved', async ($, on) => {
+    const store = storeOf(on)
+    projectOf(on)
+    await tree($)
+
+    const ui = await $.ui.mount(PANE)
+
+    await ui.press({ key: 'row:README.md' })
+
+    // Another session in the project saves its own view meanwhile
+    store.set(KEY, { expanded: ['src'], selected: 'src/main.ts', pinned: false, markdownMode: 'rendered', savedAt: 2 })
+    await tree($)
+    await tree($)
+
+    const isPreviewed = async () =>
+      (await ui.find({ type: 'Markdown' })) !== undefined || (await ui.find({ type: 'Code' })) !== undefined
+
+    await until(ui, isPreviewed, 'the preview')
+    expect(await ui.find({ type: 'Markdown' })).toBeDefined()
+    expect(await ui.find({ key: 'row:src/main.ts' })).toBeUndefined()
+
+    await ui.unmount()
+  })
+
+  test('after /clear, /resume or /branch the preview opens where it was saved', async ($, on) => {
+    mock.store(on, {
+      [KEY]: { expanded: ['src'], selected: 'src/main.ts', pinned: false, markdownMode: 'rendered', savedAt: 1 },
+    })
+    projectOf(on)
+    on('classic.SessionStart', () => ({}))
+
+    await $.classic.SessionStart({ source: 'resume' })
+
+    const ui = await $.ui.mount(PANE)
+
+    await until(ui, async () => (await ui.find({ type: 'Code' })) !== undefined, 'the saved file')
+    expect(await ui.find({ type: 'Code' })).toMatchObject({ props: { path: 'src/main.ts' } })
 
     await ui.unmount()
   })

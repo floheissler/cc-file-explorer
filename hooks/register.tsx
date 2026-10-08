@@ -61,7 +61,7 @@ import {
 } from './poll'
 import { maxPreviewTop, previewHeightOf, sourceColumnsOf, type Preview } from './preview'
 import { findEntry, revealPathsOf, rowsRevealing } from './reveal'
-import { loadFolders, saveFolders } from './saved'
+import { loadView, saveView } from './saved'
 import { NO_MARKS, treeMarksOf } from './status'
 import { messageOf, sanitize, truncateMiddle } from './text'
 import {
@@ -92,8 +92,9 @@ const COMMAND_NAME = 'tree'
 /**
  * The pane's state the drawing reads, held by the session: it survives a
  * reload of the module, a write redraws the pane, and `/clear`, `/resume`
- * and `/branch` reset it. The open folders are also saved for the project
- * (saved.ts), and a session's first open and those resets start from them.
+ * and `/branch` reset it. The open folders and the preview's file, pin and
+ * Markdown mode are also saved for the project (saved.ts), and a session's
+ * first open and those resets start from them.
  */
 const EXPANDED = atom({ plugin: 'file-explorer', key: 'expanded' } as const, [])
 const SELECTED = atom({ plugin: 'file-explorer', key: 'selected' } as const, null)
@@ -691,39 +692,73 @@ export const register: Register = on => {
   }
 
   /**
-   * Saves of the open folders to the store, one at a time and in order, each
-   * saving the folders open when it runs: the last save leaves the store as
-   * the tree stands.
+   * Saves of the pane's view to the store, one at a time and in order, each
+   * saving the view as it stands when it runs: the last save leaves the
+   * store as the pane stands. One waits at most, as it saves every change
+   * made before it runs, so a preview following held arrows saves as often
+   * as the store keeps up, not once a row.
    */
-  let saves: Promise<void> = Promise.resolve()
+  const saving = { last: Promise.resolve(), isWaiting: false }
 
   /**
-   * Opens or closes folders of the whole tree, and saves the folders then
-   * open for the project, so its next session opens the tree where this one
-   * left it. A filtered tree's own open folders are the module's, unsaved.
+   * Saves the pane's view for the project after a change to it, so its next
+   * session opens the pane where this one left it: the whole tree's open
+   * folders, and the preview's file, pin and Markdown mode. A filtered
+   * tree's own open folders are the module's, unsaved.
+   *
+   * @returns settles once a save that holds the change has run
    */
-  const setExpanded = async (host: Host, change: (paths: string[]) => string[]) => {
-    await host.state.expanded.set(change)
+  const queueSave = (host: Host): Promise<void> => {
+    if (saving.isWaiting) {
+      return saving.last
+    }
+
+    saving.isWaiting = true
 
     // A failed save keeps the one before it; the next change saves again
-    const save = saves
-      .then(async () => saveFolders(host, await host.state.expanded.get(), Date.now()))
+    saving.last = saving.last
+      .then(async () => {
+        saving.isWaiting = false
+        await saveView(host, Date.now())
+      })
       .catch(() => undefined)
 
-    saves = save
-    await save
+    return saving.last
   }
 
   /**
-   * Opens the tree where the project's open folders were last saved, by
-   * this session or another; nothing saved leaves it as it is.
+   * Opens or closes folders of the whole tree, and saves the view.
    */
-  const restoreFolders = async (host: Host) => {
-    const saved = await loadFolders(host)
+  const setExpanded = async (host: Host, change: (paths: string[]) => string[]) => {
+    await host.state.expanded.set(change)
+    await queueSave(host)
+  }
 
-    if (saved !== null) {
-      await host.state.expanded.set(() => saved)
+  /**
+   * Opens the pane where the project's view was last saved, by this session
+   * or another: the open folders, and the preview's file (from its top), pin
+   * and Markdown mode. Nothing saved leaves the pane as it is. Either way the
+   * open folders are written, so this session's later opens keep its own
+   * view, whatever another session saves meanwhile.
+   */
+  const restoreView = async (host: Host) => {
+    const saved = await loadView(host)
+
+    if (saved === null) {
+      await host.state.expanded.set(paths => paths)
+
+      return
     }
+
+    const isSameFile = (await host.state.selected.get()) === saved.selected
+
+    await Promise.all([
+      host.state.expanded.set(() => [...saved.expanded]),
+      host.state.selected.set(() => saved.selected),
+      host.state.pinned.set(() => saved.pinned),
+      host.state.markdownMode.set(() => saved.markdownMode),
+      ...(isSameFile ? [] : [host.state.previewTop.set(() => 0)]),
+    ])
   }
 
   /**
@@ -809,7 +844,9 @@ export const register: Register = on => {
 
   /**
    * Shows a file in the preview from its top: read first, then named in the
-   * session state, `leaving` drawn meanwhile. A later switch to another file
+   * session state, `leaving` drawn meanwhile, then saved for the project:
+   * the next switch waits for that save, which a burst of switches shares,
+   * and the ring never waits. A later switch to another file
    * waiting, or `forget`, drops it; a follow of the ring lapses where the
    * preview was closed or pinned since the ring moved, and a pick of the
    * person's never does. A file the preview shows already is left as it is.
@@ -856,6 +893,8 @@ export const register: Register = on => {
     } finally {
       leaving = null
     }
+
+    await queueSave(host)
   }
 
   /**
@@ -907,6 +946,7 @@ export const register: Register = on => {
   const closePreview = async (host: Host) => {
     isFileShown = false
     await Promise.all([host.state.selected.set(() => null), host.state.pinned.set(() => false)])
+    await queueSave(host)
   }
 
   /**
@@ -1509,10 +1549,12 @@ export const register: Register = on => {
 
     toggleMarkdownMode: async () => {
       await host.state.markdownMode.set(mode => (mode === 'rendered' ? 'source' : 'rendered'))
+      await queueSave(host)
     },
 
     togglePin: async () => {
       await host.state.pinned.set(pinned => !pinned)
+      await queueSave(host)
 
       // Let go, the preview shows the file the ring rests on at once
       if (!(await host.state.pinned.get())) {
@@ -1661,13 +1703,13 @@ export const register: Register = on => {
 
   /**
    * `/clear`, `/resume` and `/branch` start the session state over: what was
-   * read is forgotten, and the tree, open or not, opens again where the
-   * project's folders were saved. Left at its default, the next change would
-   * save the default over them.
+   * read is forgotten, and the pane, open or not, opens again where the
+   * project's view was saved. Left at its default, the next change would
+   * save the default over it.
    */
   on('classic.SessionStart', { source: ['clear', 'resume', 'fork'] }, async ($, e, next) => {
     forget()
-    await restoreFolders(hostOf($)).catch(() => undefined)
+    await restoreView(hostOf($)).catch(() => undefined)
 
     return next(e)
   }).catch(($, e, next) => next(e))
@@ -1688,10 +1730,10 @@ export const register: Register = on => {
       return {}
     }
 
-    // A session's first open starts the tree where the project's folders
-    // were saved; later opens keep the folders this session left open
+    // A session's first open starts the pane where the project's view was
+    // saved; later opens keep the view this session left
     if (!(await host.state.expanded.isSet())) {
-      await restoreFolders(host).catch(() => undefined)
+      await restoreView(host).catch(() => undefined)
     }
 
     // A pane opens on the whole tree: a file shown inline, the help, or a

@@ -129,14 +129,15 @@ const Limits = {
    */
   TOAST_PATH_CELLS: 60,
   /**
-   * Projects whose open folders the store keeps; past it the one saved
+   * Projects whose view of the pane the store keeps; past it the one saved
    * longest ago is dropped. The store holds 4 MiB in all, shared with every
    * other value the mod keeps there.
    */
   MAX_SAVED_PROJECTS: 50,
   /**
-   * Characters of JSON one project's saved folders take at most, the
-   * shallowest folders kept first. With `MAX_SAVED_PROJECTS`, 800,000 in
+   * Characters of JSON one project's saved folders and previewed file take
+   * at most, the file first, then the shallowest folders. Its pin and
+   * Markdown mode add a few dozen more. With `MAX_SAVED_PROJECTS`, 800,000 in
    * all: a fifth of the store in ASCII names, under 2.5 MiB even at three
    * bytes a character.
    */

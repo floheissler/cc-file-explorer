@@ -105,7 +105,7 @@ export type Host = {
   /**
    * This plugin's own store, kept between sessions and shared by every
    * session that runs the mod: what the pane has told the person once, and
-   * each project's open folders.
+   * each project's view of the pane.
    */
   readonly store: {
     readonly get: (key: string) => Promise<unknown>

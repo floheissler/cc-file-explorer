@@ -22,7 +22,8 @@ without leaving the session.
   (`a`).
 - **Stay current**: Claude's edits and changes made outside Claude show within
   seconds.
-- **Pick up where you left off**: each project's open folders are remembered.
+- **Pick up where you left off**: each project's open folders and preview
+  are remembered.
 
 It is a [mod](https://code.claude.com/docs/en/plugins/mods/overview): a plugin
 of function hooks that draws in Claude Code's own interface, in the terminal
@@ -212,9 +213,10 @@ previewed file, and above the prompt the file in view.
   included, as other file explorers show them.
 - Up to 2,000 entries per folder; a note counts the rest.
 - The folders you left open in this project. Every change to the open
-  folders is saved for the project, and a session's first `/tree` opens them
-  again, as do `/clear`, `/resume` and `/branch`; later opens in a session
-  keep that session's own. The 50 projects changed most recently are
+  folders is saved for the project, with the
+  [preview](#what-the-preview-shows), and a session's first `/tree` opens
+  them again, as do `/clear`, `/resume` and `/branch`; later opens in a
+  session keep that session's own. The 50 projects changed most recently are
   remembered, and a saved folder that is gone stays closed.
 - Names too long for the pane cut in the middle, measured in terminal columns
   as Claude Code measures them: CJK and most emoji take two, accents none, and
@@ -296,6 +298,12 @@ the checks notice in a folder the filtered tree shows.
 | Any other text | Source with syntax colors by extension, and line numbers; long lines wrap, and the preview scrolls until the file's last line shows |
 | Binary, empty, over 2 MB | A notice in place of the text |
 
+The preview is saved for the project with the open folders: the file it
+shows, whether it is pinned, and whether Markdown shows as source. A
+session's first `/tree` opens it again from the file's top, as do `/clear`,
+`/resume` and `/branch`; above the prompt the tree shows first, as always. A
+saved file that is gone opens no preview.
+
 File names and text are drawn safely: control characters show as their
 Control Pictures (an escape as `␛`, a tab in a name as `␉`), bidirectional
 controls and other unsafe characters as `�`, and long runs of combining marks
@@ -320,9 +328,10 @@ It makes no network requests, never calls a model, and writes no files of its
 own. The one program it starts is `git`, read-only (`status`, `ls-files`,
 `rev-parse`), with optional locks off so it never gets in the way of your own
 commits. Between sessions it keeps two things in the store Claude Code keeps
-for each plugin: whether its one-time fullscreen tip was shown, and the open
-folders of the 50 projects you changed most recently, as paths relative to
-each project.
+for each plugin: whether its one-time fullscreen tip was shown, and for the
+50 projects you changed most recently, the open folders and the previewed
+file, as paths relative to each project, with the preview's pin and Markdown
+mode.
 
 To check this before you install, clone the repository and run
 `claude plugin validate .`: it lists every event the mod handles and every
@@ -367,13 +376,13 @@ each one.
 | Event | What the hook does |
 | --- | --- |
 | `session.start` | Registers `/tree [path]`; after a reload of the module, starts the checks again for a pane still open |
-| `command.run` of `tree` | Opens the pane on its tree, focused (above the prompt: up to 40 rows, closed by Esc under the classic renderer), reads git's status beside it, and starts its checks for outside changes, or closes it when it is shown; a session's first open starts from the project's saved folders; leaves the one-time tip. With a path, closes a filter first, places the path under the root (an absolute one spelled through a link by where it lands), finds it folder by folder, each folder read afresh, opens its folders, picks a file, and moves the whole tree's window to its row, never closing the pane |
+| `command.run` of `tree` | Opens the pane on its tree, focused (above the prompt: up to 40 rows, closed by Esc under the classic renderer), reads git's status beside it, and starts its checks for outside changes, or closes it when it is shown; a session's first open starts from the project's saved folders and preview; leaves the one-time tip. With a path, closes a filter first, places the path under the root (an absolute one spelled through a link by where it lands), finds it folder by folder, each folder read afresh, opens its folders, picks a file, and moves the whole tree's window to its row, never closing the pane |
 | `ui.render` of the `Pane` | Draws for where the pane sits. Docked: the header, the filter's row while it is shown, the tree's window (filtered while the filter holds a query) and, set off by a blank row and a rule with the file's name, the preview's window, each exactly as tall as its region. Above the prompt: one view, the tree or the file or the help, as tall as its content. Rows carry their markers. Reads what the drawing needs but lacks |
 | `ui.scroll` of the pane | Moves the tree's or the preview's own window by the region under the pointer, as far as the wheel's rows say; the engine's window over the pane stays still |
 | `ui.focus` in the pane | Keeps the focused row and its neighbors in view, so the arrows always have a drawn row to move to, and lands the focus where that row is drawn after the window moves; brings the focus into the pane at the tree's first row, ahead of the header's controls, and wraps it back there; keeps the focus off the hidden digit keys; records where the focus rests, for `a` to mention the row it marks; docked, shows the file it lands on in an open preview that is not pinned. The row `/tree <path>` revealed keeps the focus's start until you move it, and the row `a` mentioned until the focus lands anywhere |
 | `ui.close` of the pane | Above the prompt, a person's close steps back first: from the file or the help to the tree, from a filtered tree to the whole tree; a close that goes through stops the checks for outside changes |
 | `tool.call` of `Write`, `Edit`, `NotebookEdit`, `Bash`, `PowerShell` | After a call that may have written (not held read-only, not denied), re-reads an open pane's tree, preview, git status and, while filtering, file list once Claude pauses; after an edit that went through, marks its file as written this session |
-| `classic.SessionStart` after `/clear`, `/resume`, `/branch` | Forgets what was read, as the session state resets, and opens the tree again where the project's folders were saved |
+| `classic.SessionStart` after `/clear`, `/resume`, `/branch` | Forgets what was read, as the session state resets, and opens the tree and the preview again where the project's view was saved |
 
 It calls `$.session.root`, `$.session.cwd`, `$.fs.list`, `$.fs.stat`,
 `$.fs.read`, `$.process.run`, `$.clock.after`, `$.command.register`,
@@ -390,8 +399,9 @@ or writes the index, the C locale, and a timeout. It reads the prompt's
 draft only when you press `a`, to set the mention off from the words
 around the cursor. What it keeps between sessions lives in the store
 Claude Code keeps for each plugin (`~/.claude/plugins/store/`): whether the
-fullscreen tip was shown, and the open folders of the 50 projects changed
-most recently, as paths relative to each project's root.
+fullscreen tip was shown, and for the 50 projects changed most recently,
+the open folders and the previewed file, as paths relative to each
+project's root, with the preview's pin and Markdown mode.
 `claude plugin validate .` prints the same list from the source.
 
 The person's view (open folders, the previewed file and whether it is
