@@ -93,6 +93,11 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.press({ key: 'row:src' })
     expect(await ui.find({ key: 'row:src/main.ts' })).toBeDefined()
 
+    // Branch lines as the tree command draws them: src/main.ts is the last
+    // row of src, and README.md, after it, the last of the root
+    expect(await ui.find({ type: 'Text', text: '│ └─' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '└─' })).toBeDefined()
+
     // Markdown previews rendered, and as source on `m`
     await ui.press({ key: 'row:README.md' })
     expect(await ui.find({ type: 'Markdown' })).toMatchObject({ props: { text: '# Hello\n\nSome **text**' } })

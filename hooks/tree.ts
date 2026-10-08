@@ -23,18 +23,35 @@ export type DirListing =
  * loading, unreadable, empty, entries left out).
  */
 export type TreeRow =
-  | (Entry & {
-      readonly type: 'entry'
-      readonly depth: number
-      readonly isExpanded: boolean
-    })
-  | {
+  | (Entry &
+      Branch & {
+        readonly type: 'entry'
+        readonly depth: number
+        readonly isExpanded: boolean
+      })
+  | (Branch & {
       readonly type: 'note'
       readonly key: string
       readonly depth: number
       readonly text: string
       readonly isError: boolean
-    }
+    })
+
+/**
+ * Where a row sits among the rows of its folder, for the branch lines drawn
+ * before it as the `tree` command draws them.
+ */
+export type Branch = {
+  /**
+   * One per folder above the row, outermost first: whether that folder has
+   * rows still to come below this one, so its line continues past the row.
+   */
+  readonly guides: readonly boolean[]
+  /**
+   * Whether the row is the last of its folder.
+   */
+  readonly isLast: boolean
+}
 
 /**
  * Which rows of the flattened tree its window shows, and how many lie out of
@@ -84,48 +101,74 @@ export function flattenTree(
 ): TreeRow[] {
   const rows: TreeRow[] = []
 
-  const note = (dir: string, depth: number, text: string, isError = false) =>
-    rows.push({ type: 'note', key: `note:${dir}`, depth, text, isError })
+  // A note is always the last row of its folder: alone, or after the entries
+  const note = (dir: string, guides: readonly boolean[], text: string, isError = false) =>
+    rows.push({
+      type: 'note',
+      key: `note:${dir}`,
+      depth: guides.length,
+      guides,
+      isLast: true,
+      text,
+      isError,
+    })
 
-  const visit = (dir: string, depth: number): void => {
+  const visit = (dir: string, guides: readonly boolean[]): void => {
     const listing = listingOf(dir)
 
     if (listing === undefined) {
-      note(dir, depth, 'Loading…')
+      note(dir, guides, 'Loading…')
 
       return
     }
 
     if ('error' in listing) {
-      note(dir, depth, `Can't read this folder: ${listing.error}`, true)
+      note(dir, guides, `Can't read this folder: ${listing.error}`, true)
 
       return
     }
 
     if (listing.entries.length === 0 && listing.truncated === 0) {
-      note(dir, depth, dir === '' ? 'This folder is empty' : 'empty')
+      note(dir, guides, dir === '' ? 'This folder is empty' : 'empty')
 
       return
     }
 
-    for (const entry of listing.entries) {
+    const last = listing.entries.length - 1
+
+    listing.entries.forEach((entry, at) => {
+      const isLast = at === last && listing.truncated === 0
       const isExpanded = entry.kind === 'dir' && expanded.has(entry.path)
 
-      rows.push({ ...entry, type: 'entry', depth, isExpanded })
+      rows.push({ ...entry, type: 'entry', depth: guides.length, guides, isLast, isExpanded })
 
       if (isExpanded) {
-        visit(entry.path, depth + 1)
+        visit(entry.path, [...guides, !isLast])
       }
-    }
+    })
 
     if (listing.truncated > 0) {
-      note(dir, depth, `… ${listing.truncated.toLocaleString('en-US')} more not shown`)
+      note(dir, guides, `… ${listing.truncated.toLocaleString('en-US')} more not shown`)
     }
   }
 
-  visit('', 0)
+  visit('', [])
 
   return rows
+}
+
+/**
+ * The branch lines drawn before a row, as the `tree` command draws them: a
+ * `│` for each folder above whose rows continue, then `├─`, or `└─` for the
+ * last row of its folder.
+ *
+ * @param branch where the row sits among its folder's rows
+ * @returns the lines, two cells per folder above and two for the row's own
+ */
+export function branchPrefixOf(branch: Branch): string {
+  const guides = branch.guides.map(continues => (continues ? '│ ' : '  ')).join('')
+
+  return `${guides}${branch.isLast ? '└─' : '├─'}`
 }
 
 /**

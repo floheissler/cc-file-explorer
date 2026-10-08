@@ -14,8 +14,8 @@ import {
   tableWindowOf,
   type Preview,
 } from './preview'
-import { formatBytes, padEnd, plural, sanitize, truncateMiddle } from './text'
-import type { TreeRow, TreeWindow } from './tree'
+import { formatBytes, padEnd, plural, sanitize, truncateEnd, truncateMiddle } from './text'
+import { branchPrefixOf, type TreeRow, type TreeWindow } from './tree'
 
 /**
  * The elements the pane draws with, from the table `$.ui.resolve(e)` hands
@@ -148,37 +148,66 @@ function treeRegion(kit: Kit, model: PaneModel): RenderElement {
   )
 }
 
+/**
+ * The branch lines before a row, cut from the left in a pane too narrow for
+ * the whole depth, so a name always keeps a few cells.
+ */
+function branchOf(row: TreeRow, columns: number): string {
+  const branch = branchPrefixOf(row)
+  const room = Math.max(2, columns - 6)
+
+  return branch.length <= room ? branch : branch.slice(branch.length - room)
+}
+
+/**
+ * One row of the tree: its branch lines, dim, then the row itself. An entry
+ * is a Button padded to the row's end, so the name and the rest of the row
+ * press it; the branch lines are drawing only.
+ */
 function treeRow(kit: Kit, row: TreeRow, selected: string | null): RenderElement {
-  const { Text, Button } = kit.ui
-  const indent = '  '.repeat(row.depth)
+  const { Box, Text, Button } = kit.ui
+  const branch = branchOf(row, kit.columns)
+  const room = Math.max(1, kit.columns - branch.length)
 
   if (row.type === 'note') {
-    return row.isError ? (
-      <Text color="error" wrap="truncate-end">{`${indent}  ${row.text}`}</Text>
-    ) : (
-      <Text dimColor italic wrap="truncate-end">{`${indent}  ${row.text}`}</Text>
+    const text = truncateEnd(` ${row.text}`, room)
+
+    return (
+      <Box flexDirection="row" height={1}>
+        <Text dimColor>{branch}</Text>
+        {row.isError ? (
+          <Text color="error">{text}</Text>
+        ) : (
+          <Text dimColor italic>
+            {text}
+          </Text>
+        )}
+      </Box>
     )
   }
 
   const isDir = row.kind === 'dir'
   const isSelected = row.path === selected
   const glyph = isDir ? (row.isExpanded ? '▾' : '▸') : isSelected ? '•' : ' '
-  const lead = `${indent}${glyph} `
-  const name = truncateMiddle(sanitize(row.name), Math.max(1, kit.columns - lead.length))
-  const label = padEnd(`${lead}${name}`, kit.columns)
+  const lead = `${glyph} `
+  const name = truncateMiddle(sanitize(row.name), Math.max(1, room - lead.length))
+  const label = padEnd(`${lead}${name}`, room)
 
   const onPress = isDir
     ? () => kit.actions.toggleDir(row.path)
     : () => kit.actions.selectFile(row.path)
 
   return (
-    <Button
-      key={`${ROW_KEY_PREFIX}${row.path}`}
-      label={label}
-      plain
-      dimColor={!isDir && !isSelected}
-      onPress={onPress}
-    />
+    <Box flexDirection="row" height={1}>
+      <Text dimColor>{branch}</Text>
+      <Button
+        key={`${ROW_KEY_PREFIX}${row.path}`}
+        label={label}
+        plain
+        dimColor={!isDir && !isSelected}
+        onPress={onPress}
+      />
+    </Box>
   )
 }
 

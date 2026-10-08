@@ -53,6 +53,8 @@ Keys work while the pane has the keyboard: click it, or press Ctrl+X then Tab.
 
 ### What the tree shows
 
+- Branch lines as the `tree` command draws them (`├─`, `└─` for the last
+  entry of a folder, `│` while a folder continues), dim beside the names.
 - The session's project root in Windows File Explorer's order: every folder
   before any file, and within each, dot names first and the rest sorted as
   people sort them (`file2` before `file10`).

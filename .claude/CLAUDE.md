@@ -45,7 +45,9 @@ the module otherwise:
   tree's and the preview's own windows under a fixed header.
 - Untrusted text (file names, file contents, error messages) goes through
   `sanitize` before it is drawn.
-- Tree row Buttons are keyed `row:<path>`; the `ui.focus` hook relies on it.
+- A tree row is a dim `Text` of branch lines (`branchPrefixOf`, from the
+  `guides`/`isLast` that `flattenTree` computes) beside a `Button` keyed
+  `row:<path>` for the glyph and name; the `ui.focus` hook relies on the key.
 - The version lives in `.claude-plugin/plugin.json` alone; the pane shows none.
   Bump it per release, or `claude plugin update` delivers nothing.
 

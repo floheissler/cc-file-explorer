@@ -2,6 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import { paneLayoutOf, regionAt } from '../hooks/layout'
 import {
+  branchPrefixOf,
   compareEntries,
   flattenTree,
   maxTreeTop,
@@ -78,6 +79,30 @@ describe('flattenTree', () => {
     const rows = flattenTree(() => ({ entries: [], truncated: 0 }), new Set())
 
     expect(rows).toMatchObject([{ type: 'note', text: 'This folder is empty' }])
+  })
+})
+
+describe('branchPrefixOf', () => {
+  test('draws ├─ per row, └─ for the last of its folder, and │ while a folder has rows below', async () => {
+    const listings = new Map<string, DirListing>([
+      ['', { entries: [dir('src'), file('README.md')], truncated: 0 }],
+      ['src', { entries: [file('src/main.ts')], truncated: 3 }],
+    ])
+    const rows = flattenTree(path => listings.get(path), new Set(['src']))
+
+    // The note counting what was left out is the last row of src
+    expect(rows.map(branchPrefixOf)).toEqual(['├─', '│ ├─', '│ └─', '└─'])
+  })
+
+  test('ends the outer line under the last folder of the root', async () => {
+    const listings = new Map<string, DirListing>([
+      ['', { entries: [dir('alpha'), dir('zeta')], truncated: 0 }],
+      ['zeta', { entries: [dir('zeta/inner'), file('zeta/z.txt')], truncated: 0 }],
+      ['zeta/inner', { entries: [file('zeta/inner/deep.md')], truncated: 0 }],
+    ])
+    const rows = flattenTree(path => listings.get(path), new Set(['zeta', 'zeta/inner']))
+
+    expect(rows.map(branchPrefixOf)).toEqual(['├─', '└─', '  ├─', '  │ └─', '  └─'])
   })
 })
 
