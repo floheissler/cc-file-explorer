@@ -1,6 +1,6 @@
 # file-explorer
 
-A file explorer pane for Claude Code. `/explorer` opens the project beside the
+A file explorer pane for Claude Code. `/tree` opens the project beside the
 conversation as a tree you expand and collapse in place, and previews the file
 you pick under it: Markdown rendered as Claude's replies are, CSV and TSV as
 tables, source and text files with syntax colors and line numbers.
@@ -31,7 +31,7 @@ claude --plugin-dir /path/to/cc-file-explorer
 
 ## Use
 
-Run `/explorer` to open the pane, and again to close it. In fullscreen
+Run `/tree` to open the pane, and again to close it. In fullscreen
 rendering (`/tui fullscreen`) the pane docks beside the transcript from 110
 columns; otherwise it opens above the prompt and Esc closes it.
 
@@ -95,8 +95,8 @@ cannot send escape sequences to your terminal.
 
 | Event | What the hook does |
 | --- | --- |
-| `session.start` | Registers `/explorer` |
-| `command.run` of `explorer` | Opens the pane, focused, or closes it when it is shown |
+| `session.start` | Registers `/tree` |
+| `command.run` of `tree` | Opens the pane, focused, or closes it when it is shown |
 | `ui.render` of the `Pane` | Draws the header, the tree's window and, set off by a blank row and a rule with the file's name, the preview's window, each exactly as tall as its region; reads what the drawing needs but lacks |
 | `ui.scroll` of the pane | Moves the tree's or the preview's own window by the region under the pointer; the engine's window over the pane stays still |
 | `ui.focus` in the pane | Keeps the focused row and its neighbors in view, so the arrows always have a drawn row to move to |
@@ -147,7 +147,7 @@ release, because users only receive a release whose version changed.
 
 ## Roadmap
 
-- Reveal a file in the tree from a path (`/explorer src/main.ts`)
+- Reveal a file in the tree from a path (`/tree src/main.ts`)
 - Filter the tree by name
 - A toggle that shows ignored files
 - Remember open folders per project across sessions

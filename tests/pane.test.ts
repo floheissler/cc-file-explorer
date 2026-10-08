@@ -75,7 +75,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     })
 
     await $.command.run({
-      command: 'explorer',
+      command: 'tree',
       args: '',
       origin: { kind: 'composer' },
       presentation: { isFullscreen: true, columns: 160 },
@@ -138,7 +138,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 }
 
-test('/explorer closes the pane it opened', async ($, on) => {
+test('/tree closes the pane it opened', async ($, on) => {
   const closed: string[] = []
 
   on('ui.panes', () => ({
@@ -151,7 +151,7 @@ test('/explorer closes the pane it opened', async ($, on) => {
   })
 
   await $.command.run({
-    command: 'explorer',
+    command: 'tree',
     args: '',
     origin: { kind: 'composer' },
     presentation: { isFullscreen: true, columns: 160 },

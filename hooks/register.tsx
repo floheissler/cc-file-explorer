@@ -30,7 +30,7 @@ import { paneView, type PaneActions } from './view'
  * `+ /name – description` row instead of its two columns.
  */
 const PANE_ID = 'file-explorer'
-const COMMAND_NAME = 'explorer'
+const COMMAND_NAME = 'tree'
 
 /**
  * The pane's state the drawing reads, held by the session: it survives a
@@ -112,7 +112,7 @@ function hostOf($: EngineInterface): Host {
 }
 
 /**
- * Registers the explorer: `/explorer` toggles a pane that lists the project
+ * Registers the explorer: `/tree` toggles a pane that lists the project
  * as a tree, folders opening in place, and previews the file picked under
  * it. The pane scrolls its tree and its preview itself, under a header that
  * stays put, and re-reads what it shows after Claude's edits and commands.
@@ -400,7 +400,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     try {
       await $.command.register({
-        name: 'explorer',
+        name: 'tree',
         description: COMMAND_DESCRIPTION,
         immediate: true,
       })
@@ -417,7 +417,7 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  on('command.run', { command: 'explorer' }, async ($, e) => {
+  on('command.run', { command: 'tree' }, async ($, e) => {
     const pane = (await $.ui.panes()).find(open => open.id === PANE_ID)
 
     if (pane?.isShown === true) {

@@ -1,6 +1,6 @@
 # cc-file-explorer
 
-A Claude Code mod (a plugin of function hooks) that adds `/explorer`: a pane
+A Claude Code mod (a plugin of function hooks) that adds `/tree`: a pane
 with the project as a collapsible tree and a preview of the picked file. The
 repository is the plugin and its own marketplace (`cc-file-explorer`, one
 entry with `"source": "./"`). README.md has the user-facing behavior.
@@ -33,14 +33,16 @@ the module otherwise:
 - `read`/`update` take atoms that are `const`s of `register.tsx`, built with
   `atom({ plugin: 'file-explorer', key: '…' } as const, …)` from literals, and
   every key must be declared in `types/index.d.ts`.
-- Write hook matchers as literals (`{ command: 'explorer' }`), so validation and
+- Write hook matchers as literals (`{ command: 'tree' }`), so validation and
   an administrator's review read exactly what each hook matches.
 - A `ui.render` hook never writes state; write from a handler or another hook.
 
 ## Conventions
 
-- The `/explorer` command must not start with `file-`: Claude Code 2.1.293's
-  command menu draws any such name as a one-line `+ /name – description` row.
+- The command is `/tree`: it tops the `/` menu as soon as `/tr` is typed (no
+  built-in starts with `tr`), where `/explorer` ranked below `/export`. It must
+  not start with `file-`: Claude Code 2.1.293's command menu draws any such
+  name as a one-line `+ /name – description` row.
 - Every drawn region is exactly as tall as `layout.ts` says, so the drawing fits
   the body: Up/Down then walk the controls, and the `ui.scroll` hook moves the
   tree's and the preview's own windows under a fixed header.
