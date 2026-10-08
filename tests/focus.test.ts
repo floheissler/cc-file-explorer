@@ -1,7 +1,14 @@
 import type { RenderElement } from 'claude-code'
 import { describe, expect, test } from 'claude-code/testing'
 
-import { focusOrderOf, focusStepOf, ringElementOf, ringPlaceOf, type FocusOrder } from '../hooks/focus'
+import {
+  focusOrderOf,
+  focusStepOf,
+  ringElementOf,
+  ringPlaceOf,
+  ringStartOf,
+  type FocusOrder,
+} from '../hooks/focus'
 
 /**
  * A drawn element as plain data, as the render hook returns it.
@@ -42,12 +49,28 @@ describe('focusStepOf', () => {
     expect(focusStepOf(undefined, 'preview-close', order)).toBe('pass')
   })
 
+  test('comes in at the tree’s first row, ahead of the header’s controls', async () => {
+    expect(focusStepOf('expand-level', undefined, order)).toEqual({ element: 'row:a' })
+  })
+
+  test('walks up from the tree’s first row into the header', async () => {
+    expect(focusStepOf('help', 'row:a', order)).toBe('pass')
+    expect(focusStepOf('expand-level', 'help', order)).toBe('pass')
+  })
+
+  test('comes in at the first element where no row is drawn', async () => {
+    const help: FocusOrder = { shown: ['expand-level', 'help'], hidden: order.hidden }
+
+    expect(focusStepOf('expand-level', undefined, help)).toBe('pass')
+    expect(focusStepOf('depth-0', 'help', help)).toEqual({ element: 'expand-level' })
+  })
+
   test('stops at the tree’s last row', async () => {
     expect(focusStepOf('depth-0', 'row:b', order)).toBe('stay')
   })
 
-  test('wraps forward from another shown element to the first', async () => {
-    expect(focusStepOf('depth-0', 'preview-close', order)).toEqual({ element: 'expand-level' })
+  test('wraps forward from another shown element to the tree’s first row', async () => {
+    expect(focusStepOf('depth-0', 'preview-close', order)).toEqual({ element: 'row:a' })
   })
 
   test('wraps back from the first element, or from a stop of Claude Code’s, to the last', async () => {
@@ -57,6 +80,14 @@ describe('focusStepOf', () => {
 
   test('stays when nothing is shown', async () => {
     expect(focusStepOf('depth-0', 'help', { shown: [], hidden: order.hidden })).toBe('stay')
+  })
+})
+
+describe('ringStartOf', () => {
+  test('starts at the tree’s first drawn row, else at the first shown element', async () => {
+    expect(ringStartOf({ shown: ['expand-level', 'filter-0', 'row:a', 'row:b'], hidden: new Set() })).toBe('row:a')
+    expect(ringStartOf({ shown: ['expand-level', 'help'], hidden: new Set() })).toBe('expand-level')
+    expect(ringStartOf({ shown: [], hidden: new Set(['depth-0']) })).toBeUndefined()
   })
 })
 

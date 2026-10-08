@@ -1780,8 +1780,10 @@ export const register: Register = on => {
   /**
    * The focus ring walking the tree: the window follows it, keeping a row
    * on each side of the focused one in view, and the ring lands where the
-   * row is drawn after the move. The ring stays off the hidden digit
-   * Buttons: it stops at the tree's last row and wraps from the other ends.
+   * row is drawn after the move. The ring comes into the pane at the tree's
+   * first row, ahead of the header's controls, and stays off the hidden
+   * digit Buttons: it stops at the tree's last row and wraps from the other
+   * ends.
    */
   on('ui.focus', { requestId: 'file-explorer' }, async ($, e, next) => {
     // The revealed row holds the ring's start until the person moves it
@@ -1811,14 +1813,13 @@ export const register: Register = on => {
       return result
     }
 
-    if (step !== 'pass') {
-      return land(step.element, { ...e, element: step.element })
-    }
-
-    const element = e.element ?? ''
+    // A row the step moves the ring to scrolls into view as the person's own
+    // move onto it would
+    const target = step === 'pass' ? e : { ...e, element: step.element }
+    const element = target.element ?? ''
 
     if (drawn === null || !element.startsWith(ROW_KEY_PREFIX)) {
-      return land(e.element, e)
+      return land(target.element, target)
     }
 
     const { rows, layout } = drawn
@@ -1826,14 +1827,14 @@ export const register: Register = on => {
     const found = focusLandingOf(rows, top, layout.treeRows, element.slice(ROW_KEY_PREFIX.length))
 
     if (found === null) {
-      return land(e.element, e)
+      return land(target.element, target)
     }
 
     if (found.top !== top) {
       await update($, TREE_TOP, () => found.top)
     }
 
-    return land(e.element, { ...e, element: `${ROW_KEY_PREFIX}${found.landing}` })
+    return land(target.element, { ...target, element: `${ROW_KEY_PREFIX}${found.landing}` })
   }).catch(($, e, next) => next(e))
 
   /**

@@ -425,6 +425,56 @@ test('the focus ring lands where its row is drawn after the window moves', async
   await ui.unmount()
 })
 
+test('the focus ring comes in at the tree, ahead of the header’s controls', async ($, on) => {
+  stubFlatProject(on, 3)
+  const focused = recordFocus(on)
+  await openTree($)
+
+  // Wide enough for the header to draw every control, `expand` first
+  const pane = paneOf(30, 80)
+  const ui = await $.ui.mount(pane)
+
+  // From nothing, Down moves onto `expand`: the ring takes the first row
+  // instead, and Up from there walks into the header
+  await $.ui.focus(ringOnto('expand-level'))
+  await $.ui.focus(ringOnto('help'))
+  await $.ui.focus(ringOnto('expand-level'))
+  expect(focused).toEqual(['row:f00.txt', 'help', 'expand-level'])
+
+  // The pane takes the keyboard back with the ring on nothing
+  await ui.redraw({ ...pane.props, isFocused: false })
+  await ui.redraw(pane.props)
+  await $.ui.focus(ringOnto('expand-level'))
+  expect(focused.at(-1)).toBe('row:f00.txt')
+
+  await ui.unmount()
+})
+
+test('the focus ring comes in where the tree’s first row is drawn after the window moves', async ($, on) => {
+  stubFlatProject(on, 20)
+  const focused = recordFocus(on)
+  await openTree($)
+
+  const pane = paneOf(8, 80)
+  const ui = await $.ui.mount(pane)
+
+  // The window moves two rows down: f02 … f06 drawn under a count
+  await $.ui.focus(ringOnto('row:f05.txt'))
+  await ui.redraw({ ...pane.props, isFocused: false })
+  expect(await ui.find({ key: 'row:f01.txt' })).toBeUndefined()
+
+  // Coming in on f02, the window moves a row up to keep f01 above it, and
+  // the ring lands on f03, the place f02 takes in the next drawing
+  await ui.redraw(pane.props)
+  await $.ui.focus(ringOnto('expand-level'))
+  expect(focused.at(-1)).toBe('row:f03.txt')
+
+  await ui.redraw()
+  expect(await ui.find({ key: 'row:f01.txt' })).toBeDefined()
+
+  await ui.unmount()
+})
+
 test('the focus ring stops at the tree’s last row and wraps from the other ends', async ($, on) => {
   stubFlatProject(on, 3)
   const focused = recordFocus(on)
@@ -439,12 +489,14 @@ test('the focus ring stops at the tree’s last row and wraps from the other end
   expect(focused).toEqual(['row:f02.txt'])
 
   // With a file previewed, its controls come last: past them the ring wraps
-  // to the first control, and back from that to the last
+  // to the tree's first row; from the first control it wraps back to the last
   await ui.press({ key: 'row:f02.txt' })
   await $.ui.focus(ringOnto('preview-close'))
   await $.ui.focus(ringOnto('depth-0'))
+  await $.ui.focus(ringOnto('help'))
+  await $.ui.focus(ringOnto('expand-level'))
   await $.ui.focus(ringOnto('depth-9'))
-  expect(focused).toEqual(['row:f02.txt', 'preview-close', 'expand-level', 'preview-close'])
+  expect(focused).toEqual(['row:f02.txt', 'preview-close', 'row:f00.txt', 'help', 'expand-level', 'preview-close'])
 
   await ui.unmount()
 })
