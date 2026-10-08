@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  # main and release tags only: a branch with a pull request is tested by the
+  # pull_request run, so pushes to it would only run everything twice.
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+  # Nightly against the newest Claude Code: the mods API is early access, and
+  # the mod leans on undocumented behavior (hotkeys of hidden Buttons, where
+  # the focus ring lands after a redraw), so a release can break it with no
+  # commit here.
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # The only Windows and macOS coverage: tests/roots.test.ts tries its
+        # Windows-spelled roots (C:\, shares, \\wsl.localhost\…) on a Windows
+        # host alone, as the test host resolves paths by its own platform.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      # Keep the binary installed below for the whole run.
+      DISABLE_AUTOUPDATER: '1'
+    steps:
+      - uses: actions/checkout@v7
+
+      # The native installer, as https://code.claude.com/docs/en/setup
+      # recommends; it installs the latest release.
+      - name: Install Claude Code
+        if: runner.os != 'Windows'
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install Claude Code (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          irm https://claude.ai/install.ps1 | iex
+          "$env:USERPROFILE\.local\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - run: claude --version
+
+      # Neither needs a sign-in, an API key or the network
+      # (https://code.claude.com/docs/en/plugins/mods/test), and both exit
+      # non-zero on a failure.
+      - run: claude plugin validate --strict .
+      - run: claude plugin test .
+
+      # No tsc here: it needs .claude-plugin/types/, which Claude Code writes
+      # only when a session loads the mod with --plugin-dir. It runs locally
+      # before every commit.
