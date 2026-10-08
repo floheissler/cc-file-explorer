@@ -34,7 +34,7 @@ describe('compareEntries', () => {
     expect(sorted).toEqual(['Alpha', 'zeta', 'a.txt', 'B2.txt', 'b10.txt'])
   })
 
-  test('puts dot entries in a block on top: dot folders, then dotfiles', async () => {
+  test('orders as Windows File Explorer does: every folder before any file, dot names first in each', async () => {
     const sorted = [
       file('README.md'),
       file('.gitignore'),
@@ -47,7 +47,7 @@ describe('compareEntries', () => {
       .sort(compareEntries)
       .map(entry => entry.name)
 
-    expect(sorted).toEqual(['.claude', '.github', '.env', '.gitignore', 'src', 'a.txt', 'README.md'])
+    expect(sorted).toEqual(['.claude', '.github', 'src', '.env', '.gitignore', 'a.txt', 'README.md'])
   })
 })
 

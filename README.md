@@ -53,9 +53,9 @@ Keys work while the pane has the keyboard: click it, or press Ctrl+X then Tab.
 
 ### What the tree shows
 
-- The session's project root: dot folders and dotfiles in a block on top,
-  then folders, then files, names sorted as people sort them (`file2` before
-  `file10`).
+- The session's project root in Windows File Explorer's order: every folder
+  before any file, and within each, dot names first and the rest sorted as
+  people sort them (`file2` before `file10`).
 - In a git repository, everything `git check-ignore` does not ignore: untracked
   files show, `node_modules/`, build output and the like do not. `.git` never
   shows. Outside a repository, everything shows.
