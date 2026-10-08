@@ -1,6 +1,7 @@
 import type { FsEntry, On, PaneOpenArgs, RenderNode } from 'claude-code'
 import { describe, expect, mock, test, type Engine } from 'claude-code/testing'
 
+import { testPathOf } from './host'
 import { helpHeightOf } from '../hooks/view'
 import { FULLSCREEN_TIP_TEXT, WIDEN_TIP_TEXT } from '../hooks/names'
 
@@ -66,9 +67,9 @@ function projectOf(on: On, names: readonly string[]) {
 
     return { value: undefined }
   })
-  on('fs.list', ($, e) => ({ value: e.path === ROOT ? names.map(name => entry(name, 'file', 9)) : [] }))
+  on('fs.list', ($, e) => ({ value: testPathOf(e.path) === ROOT ? names.map(name => entry(name, 'file', 9)) : [] }))
   on('fs.stat', () => ({ value: { kind: 'file', size: 9, mtimeMs: 0, isLink: false } }))
-  on('fs.read', ($, e) => ({ value: e.path.endsWith('.md') ? '# Hello\n\nSome **text**\n' : 'const a = 1' }))
+  on('fs.read', ($, e) => ({ value: testPathOf(e.path).endsWith('.md') ? '# Hello\n\nSome **text**\n' : 'const a = 1' }))
 
   return { pane, opens }
 }

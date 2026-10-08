@@ -50,7 +50,7 @@ const ROOTS = [
 const isWindowsSpelled = (root: string) => /^(?:[A-Za-z]:[\\/]|\\\\)/.test(root)
 
 for (const { root, label, src, file } of ROOTS) {
-  const host = isWindowsSpelled(root) ? ' (on a Windows host)' : ''
+  const host = isWindowsSpelled(root) ? ' (on a Windows host)' : ' (on a POSIX host)'
 
   test(`lists and previews under the root ${JSON.stringify(root)}${host}`, async ($, on) => {
     const listed: string[] = []
@@ -85,8 +85,9 @@ for (const { root, label, src, file } of ROOTS) {
 
     // The test host makes every `$.fs` path absolute by its own platform's
     // rules before a hook sees it (on Linux, `C:\work` arrives as
-    // `<cwd>/C:\work`), so a Windows-spelled root is only tried on Windows
-    if (isWindowsSpelled(root) && listed[0] !== root) {
+    // `<cwd>/C:\work`; on Windows, `/` as `D:\`), so each root is only tried
+    // on a host of the platform that spells it
+    if (listed[0] !== undefined && isWindowsSpelled(listed[0]) !== isWindowsSpelled(root)) {
       return
     }
 

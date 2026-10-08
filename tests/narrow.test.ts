@@ -2,6 +2,7 @@ import type { FsEntry, On } from 'claude-code'
 import { describe, expect, test, type Engine } from 'claude-code/testing'
 
 import { hotkeysOf, markersOf, overflowsOf } from './drawn'
+import { testPathOf } from './host'
 import { filterKeyOf } from '../hooks/names'
 import { maxPreviewTop, previewOf, sourceColumnsOf } from '../hooks/preview'
 
@@ -94,16 +95,16 @@ function stubProject(on: On): void {
       isStderrTruncated: false,
     },
   }))
-  on('fs.list', ($, e) => ({ value: FOLDERS[e.path] ?? [] }))
+  on('fs.list', ($, e) => ({ value: FOLDERS[testPathOf(e.path)] ?? [] }))
   on('fs.stat', ($, e) => ({
     value: {
-      kind: FOLDERS[e.path] === undefined ? 'file' : 'dir',
-      size: FILES[e.path]?.length ?? 0,
+      kind: FOLDERS[testPathOf(e.path)] === undefined ? 'file' : 'dir',
+      size: FILES[testPathOf(e.path)]?.length ?? 0,
       mtimeMs: 0,
       isLink: false,
     },
   }))
-  on('fs.read', ($, e) => ({ value: FILES[e.path] ?? '' }))
+  on('fs.read', ($, e) => ({ value: FILES[testPathOf(e.path)] ?? '' }))
 }
 
 const openTree = async ($: Engine, isFullscreen: boolean) => {
