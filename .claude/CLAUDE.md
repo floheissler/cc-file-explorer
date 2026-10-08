@@ -21,6 +21,9 @@ entry with `"source": "./"`). README.md has the user-facing behavior.
 - `types/index.d.ts`: the `$.state` contract (`PluginState['file-explorer']`).
 - `tests/`: `claude plugin test` suites; `pane.test.ts` mounts the pane on the
   terminal and desktop surfaces with stubbed fs and git.
+- `ROADMAP.md` (gitignored, local): the working plan toward a publishable
+  release, a checklist with context for each item. Start there when asked to
+  work on the next item.
 
 ## Rules the engine's static scan enforces
 

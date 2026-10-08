@@ -9,7 +9,7 @@ It is a [mod](https://code.claude.com/docs/en/plugins/mods/overview): a plugin
 of function hooks that draws in Claude Code's own interface, in the terminal
 and in the Desktop app's Code tab.
 
-> **Status:** early spike (v0.1.0). Expect rough edges; see [Roadmap](#roadmap).
+> **Status:** early (v0.1.0). Expect rough edges.
 
 ## Install
 
@@ -144,15 +144,6 @@ Claude Code update to refresh them.
 
 The version lives in `.claude-plugin/plugin.json` alone; bump it with every
 release, because users only receive a release whose version changed.
-
-## Roadmap
-
-- Reveal a file in the tree from a path (`/tree src/main.ts`)
-- Filter the tree by name
-- A toggle that shows ignored files
-- Remember open folders per project across sessions
-- Image previews where the terminal draws images
-- Wide-character aware truncation for CJK and emoji file names
 
 ## License
 
