@@ -173,9 +173,12 @@ the module otherwise:
   `/tree <path>` falls back to `realKeyOf` for an absolute path alone: a
   relative one counts from the root, where `$.fs` would resolve it from
   the engine's working folder.
-- The test host makes every `$.fs` path absolute by its own platform's rules,
-  so `tests/roots.test.ts` tries Windows-spelled roots only on a Windows host
-  and returns early elsewhere; `tests/paths.test.ts` covers them anywhere.
+- The test host makes every `$.fs` path absolute by its own platform's rules
+  (on Windows, the tests' `/work` arrives as `D:\work`). So the mounted suites
+  key their stubbed disk by POSIX paths and read what a `$.fs` hook is handed
+  through `testPathOf` (`tests/host.ts`), which runs them on every host;
+  `tests/roots.test.ts` tries each root only on a host of the platform that
+  spells it, and `tests/paths.test.ts` covers Windows spellings anywhere.
 - Hook matchers name tools this build has; a tool only another platform's
   build has (PowerShell, on Windows) is matched by a pattern (`/^PowerShell$/`),
   which still reads as a literal.

@@ -1,6 +1,7 @@
 import type { FsEntry, On } from 'claude-code'
 import { describe, expect, mock, test, type Engine } from 'claude-code/testing'
 
+import { testPathOf } from './host'
 import Limits from '../hooks/limits'
 import { filterKeyOf, TIP_SHOWN_KEY } from '../hooks/names'
 import {
@@ -82,9 +83,9 @@ function projectOf(on: On, root: string = ROOT) {
 
     return { value: undefined }
   })
-  on('fs.list', ($, e) => ({ value: FOLDERS[e.path] ?? [] }))
+  on('fs.list', ($, e) => ({ value: FOLDERS[testPathOf(e.path)] ?? [] }))
   on('fs.stat', ($, e) => ({
-    value: { kind: e.path in FOLDERS ? 'dir' : 'file', size: 7, mtimeMs: 0, isLink: false },
+    value: { kind: testPathOf(e.path) in FOLDERS ? 'dir' : 'file', size: 7, mtimeMs: 0, isLink: false },
   }))
   on('fs.read', () => ({ value: 'content' }))
 

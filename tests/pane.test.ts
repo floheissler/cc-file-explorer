@@ -2,6 +2,7 @@ import type { FsEntry, On, PromptBox, PromptFillInput } from 'claude-code'
 import { expect, mock, test, type Engine } from 'claude-code/testing'
 
 import { pathTo, type ElementData } from './drawn'
+import { testPathOf } from './host'
 import Limits from '../hooks/limits'
 import { cellWidth } from '../hooks/text'
 
@@ -65,11 +66,11 @@ function stubProject(
   on('session.root', () => ({ value: ROOT }))
   on('ui.panes', () => ({ value: [] }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  on('fs.list', ($, e) => ({ value: folders[e.path] ?? [] }))
+  on('fs.list', ($, e) => ({ value: folders[testPathOf(e.path)] ?? [] }))
   on('fs.stat', ($, e) => ({
-    value: { kind: 'file', size: files[e.path]?.length ?? 0, mtimeMs: 0, isLink: false },
+    value: { kind: 'file', size: files[testPathOf(e.path)]?.length ?? 0, mtimeMs: 0, isLink: false },
   }))
-  on('fs.read', ($, e) => ({ value: files[e.path] ?? '' }))
+  on('fs.read', ($, e) => ({ value: files[testPathOf(e.path)] ?? '' }))
 }
 
 /**
@@ -600,7 +601,7 @@ for (const tool of ['Bash', 'PowerShell'] as const) {
         : [],
     }))
     on('ui.open', () => ({ value: { isPlaced: true } }))
-    on('fs.list', ($, e) => ({ value: folders[e.path] ?? [] }))
+    on('fs.list', ($, e) => ({ value: folders[testPathOf(e.path)] ?? [] }))
     on('fs.stat', () => ({ value: { kind: 'file', size: 2, mtimeMs: 0, isLink: false } }))
     on('fs.read', () => ({ value: 'hi' }))
     on('tool.call', () => ({ result: 'ran' }))

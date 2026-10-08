@@ -1,6 +1,7 @@
 import type { FsEntry, On } from 'claude-code'
 import { describe, expect, mock, test, type Engine, type MockClock } from 'claude-code/testing'
 
+import { testPathOf } from './host'
 import Limits from '../hooks/limits'
 import { changedDirsOf, mayHaveWritten, pollBatchOf, shownDirsOf } from '../hooks/poll'
 import { flattenTree, type Entry } from '../hooks/tree'
@@ -89,34 +90,38 @@ function diskOf(on: On, clock: MockClock) {
     return { value: undefined }
   })
   on('fs.list', ($, e) => {
-    calls.list.push(e.path)
+    const path = testPathOf(e.path)
 
-    return { value: folders[e.path] ?? [] }
+    calls.list.push(path)
+
+    return { value: folders[path] ?? [] }
   })
   on('fs.stat', async ($, e) => {
-    calls.stat.push(e.path)
+    const path = testPathOf(e.path)
+
+    calls.stat.push(path)
 
     if (pane.statDelayMs > 0) {
       await clock.sleep(pane.statDelayMs)
     }
 
-    const isDir = folders[e.path] !== undefined
-    const text = files[e.path]
+    const isDir = folders[path] !== undefined
+    const text = files[path]
 
     if (!isDir && text === undefined) {
-      return { deny: `ENOENT: no such file or directory, stat '${e.path}'` }
+      return { deny: `ENOENT: no such file or directory, stat '${path}'` }
     }
 
     return {
       value: {
         kind: isDir ? 'dir' : 'file',
         size: text?.length ?? 0,
-        mtimeMs: times[e.path] ?? 0,
+        mtimeMs: times[path] ?? 0,
         isLink: false,
       },
     }
   })
-  on('fs.read', ($, e) => ({ value: files[e.path] ?? '' }))
+  on('fs.read', ($, e) => ({ value: files[testPathOf(e.path)] ?? '' }))
 
   return { folders, files, times, calls, pane }
 }

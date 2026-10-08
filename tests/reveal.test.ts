@@ -1,6 +1,7 @@
 import type { FsEntry, On, PaneOpenArgs } from 'claude-code'
 import { describe, expect, test, type Engine } from 'claude-code/testing'
 
+import { testPathOf } from './host'
 import { findEntry, revealPathsOf, rowsRevealing } from '../hooks/reveal'
 import type { DirListing, Entry } from '../hooks/tree'
 
@@ -212,13 +213,13 @@ function projectOf(
 
     return { value: undefined }
   })
-  on('fs.list', ($, e) => ({ value: folders[e.path] ?? [] }))
+  on('fs.list', ($, e) => ({ value: folders[testPathOf(e.path)] ?? [] }))
   on('fs.stat', ($, e) => {
-    const realPath = e.resolve ? options.realPaths?.[e.path] : undefined
+    const realPath = e.resolve ? options.realPaths?.[testPathOf(e.path)] : undefined
 
     return { value: { kind: 'file', size: 9, mtimeMs: 0, isLink: false, ...(realPath === undefined ? {} : { realPath }) } }
   })
-  on('fs.read', ($, e) => ({ value: e.path.endsWith('.md') ? '# Hello\n\nSome **text**\n' : 'const a = 1' }))
+  on('fs.read', ($, e) => ({ value: testPathOf(e.path).endsWith('.md') ? '# Hello\n\nSome **text**\n' : 'const a = 1' }))
 
   return { pane, opens, closes, toasts }
 }

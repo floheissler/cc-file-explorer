@@ -2,6 +2,7 @@ import type { FsEntry, On, ProcessRunResult } from 'claude-code'
 import { describe, expect, mock, test, type Engine } from 'claude-code/testing'
 
 import { markersOf, rowWidthOf } from './drawn'
+import { testPathOf } from './host'
 import Limits from '../hooks/limits'
 
 const ROOT = '/work'
@@ -87,16 +88,20 @@ function repoOf(on: On) {
 
     return { value: undefined }
   })
-  on('fs.list', ($, e) => ({ value: folders[e.path] ?? [] }))
-  on('fs.stat', ($, e) => ({
-    value: {
-      kind: folders[e.path] === undefined ? 'file' : 'dir',
-      size: 1,
-      mtimeMs: times[e.path] ?? 0,
-      isLink: false,
-      ...(e.resolve ? { realPath: real[e.path] ?? e.path } : {}),
-    },
-  }))
+  on('fs.list', ($, e) => ({ value: folders[testPathOf(e.path)] ?? [] }))
+  on('fs.stat', ($, e) => {
+    const path = testPathOf(e.path)
+
+    return {
+      value: {
+        kind: folders[path] === undefined ? 'file' : 'dir',
+        size: 1,
+        mtimeMs: times[path] ?? 0,
+        isLink: false,
+        ...(e.resolve ? { realPath: real[path] ?? path } : {}),
+      },
+    }
+  })
   on('fs.read', () => ({ value: 'x' }))
   on('process.run', ($, e) => {
     runs.push({ argv: e.argv, init: e.init })

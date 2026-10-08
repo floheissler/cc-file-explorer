@@ -1,6 +1,7 @@
 import type { FsEntry, On, ProcessRunResult } from 'claude-code'
 import { expect, mock, test, type Engine } from 'claude-code/testing'
 
+import { testPathOf } from './host'
 import Limits from '../hooks/limits'
 import { filterKeyOf } from '../hooks/names'
 
@@ -81,9 +82,9 @@ function stubProject(on: On): Project {
 
     return { value: { isPlaced: true } }
   })
-  on('fs.list', ($, e) => ({ value: FOLDERS[e.path] ?? [] }))
+  on('fs.list', ($, e) => ({ value: FOLDERS[testPathOf(e.path)] ?? [] }))
   on('fs.stat', ($, e) => ({
-    value: { kind: FOLDERS[e.path] === undefined ? 'file' : 'dir', size: 2, mtimeMs: 0, isLink: false },
+    value: { kind: FOLDERS[testPathOf(e.path)] === undefined ? 'file' : 'dir', size: 2, mtimeMs: 0, isLink: false },
   }))
   on('fs.read', () => ({ value: 'export {}' }))
   on('process.run', ($, e) => {
