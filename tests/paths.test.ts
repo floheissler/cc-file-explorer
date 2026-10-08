@@ -10,6 +10,7 @@ import {
   nameOf,
   nativePathOf,
   relativePathOf,
+  rootIdOf,
   rootLabelOf,
   rootOf,
   styleOf,
@@ -39,6 +40,28 @@ describe('rootOf', () => {
   test('drops a \\\\?\\ prefix, which $.fs refuses', async () => {
     expect(rootOf('\\\\?\\C:\\proj')).toBe('C:\\proj')
     expect(rootOf('\\\\?\\UNC\\server\\share\\proj')).toBe('\\\\server\\share\\proj')
+  })
+})
+
+describe('rootIdOf', () => {
+  test('folds the spellings of a Windows root: separators, case, a trailing separator', async () => {
+    const spellings = ['C:\\Proj', 'c:\\proj\\', 'C:/Proj', 'c:/PROJ/', '\\\\?\\C:\\Proj']
+
+    expect(new Set(spellings.map(rootIdOf))).toEqual(new Set(['c:\\proj']))
+    expect(rootIdOf('C:\\')).toBe('c:\\')
+    expect(rootIdOf('c:/')).toBe('c:\\')
+    expect(rootIdOf('\\\\Server\\Share\\')).toBe('\\\\server\\share')
+  })
+
+  test('folds composed and decomposed accents, under both styles', async () => {
+    expect(rootIdOf('/Users/me/Cafe\u0301')).toBe('/Users/me/Caf\u00e9')
+    expect(rootIdOf('C:\\Cafe\u0301')).toBe(rootIdOf('c:\\CAF\u00c9'))
+  })
+
+  test('a POSIX root keeps its case and its backslashes', async () => {
+    expect(rootIdOf('/home/me/Proj/')).toBe('/home/me/Proj')
+    expect(rootIdOf('/home/we\\ird')).toBe('/home/we\\ird')
+    expect(rootIdOf('/')).toBe('/')
   })
 })
 

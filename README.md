@@ -140,6 +140,11 @@ previewed file, and above the prompt the file in view.
 - Every entry but `.git`, git-ignored ones (`node_modules/`, build output)
   included, as other file explorers show them.
 - Up to 2,000 entries per folder; a note counts the rest.
+- The folders you left open in this project. Every change to the open
+  folders is saved for the project, and a session's first `/tree` opens them
+  again, as do `/clear`, `/resume` and `/branch`; later opens in a session
+  keep that session's own. The 50 projects changed most recently are
+  remembered, and a saved folder that is gone stays closed.
 - Names too long for the pane cut in the middle, measured in terminal columns
   as Claude Code measures them: CJK and most emoji take two, accents none, and
   a cut never splits a character.
@@ -258,20 +263,20 @@ Known limits:
 | Event | What the hook does |
 | --- | --- |
 | `session.start` | Registers `/tree [path]`; after a reload of the module, starts the checks again for a pane still open |
-| `command.run` of `tree` | Opens the pane on its tree, focused (above the prompt: up to 40 rows, closed by Esc under the classic renderer), reads git's status beside it, and starts its checks for outside changes, or closes it when it is shown; leaves the one-time tip. With a path, closes a filter first, places the path under the root (an absolute one spelled through a link by where it lands), finds it folder by folder, each folder read afresh, opens its folders, picks a file, and moves the whole tree's window to its row, never closing the pane |
+| `command.run` of `tree` | Opens the pane on its tree, focused (above the prompt: up to 40 rows, closed by Esc under the classic renderer), reads git's status beside it, and starts its checks for outside changes, or closes it when it is shown; a session's first open starts from the project's saved folders; leaves the one-time tip. With a path, closes a filter first, places the path under the root (an absolute one spelled through a link by where it lands), finds it folder by folder, each folder read afresh, opens its folders, picks a file, and moves the whole tree's window to its row, never closing the pane |
 | `ui.render` of the `Pane` | Draws for where the pane sits. Docked: the header, the filter's row while it is shown, the tree's window (filtered while the filter holds a query) and, set off by a blank row and a rule with the file's name, the preview's window, each exactly as tall as its region. Above the prompt: one view, the tree or the file or the help, as tall as its content. Rows carry their markers. Reads what the drawing needs but lacks |
 | `ui.scroll` of the pane | Moves the tree's or the preview's own window by the region under the pointer, as far as the wheel's rows say; the engine's window over the pane stays still |
 | `ui.focus` in the pane | Keeps the focused row and its neighbors in view, so the arrows always have a drawn row to move to, and lands the focus where that row is drawn after the window moves; keeps the focus off the hidden digit keys; records where the focus rests, for `a` to mention the row it marks. The row `/tree <path>` revealed keeps the focus's start until you move it, and the row `a` mentioned until the focus lands anywhere |
 | `ui.close` of the pane | Above the prompt, a person's close steps back first: from the file or the help to the tree, from a filtered tree to the whole tree; a close that goes through stops the checks for outside changes |
 | `tool.call` of `Write`, `Edit`, `NotebookEdit`, `Bash`, `PowerShell` | After a call that may have written (not held read-only, not denied), re-reads an open pane's tree, preview, git status and, while filtering, file list once Claude pauses; after an edit that went through, marks its file as written this session |
-| `classic.SessionStart` after `/clear`, `/resume`, `/branch` | Forgets what was read, as the session state resets |
+| `classic.SessionStart` after `/clear`, `/resume`, `/branch` | Forgets what was read, as the session state resets, and opens the tree again where the project's folders were saved |
 
 It calls `$.session.root`, `$.session.cwd`, `$.fs.list`, `$.fs.stat`,
 `$.fs.read`, `$.process.run`, `$.clock.after`, `$.command.register`,
 `$.prompt.read`, `$.prompt.fill`, `$.ui.open`, `$.ui.close`, `$.ui.panes`,
 `$.ui.resolve`, `$.ui.invalidate`, `$.ui.focus`, `$.ui.log`, `$.ui.toast`,
-`$.store.get`, `$.store.set` and its own `$.state`. It makes no network
-calls and writes no files of its own. The one process it starts is `git`,
+`$.store.get`, `$.store.set`, `$.store.delete`, `$.store.keys` and its
+own `$.state`. It makes no network calls and writes no files of its own. The one process it starts is `git`,
 read-only, in the project: `git ls-files` for the filter's file list, and
 for the markers `git rev-parse
 --show-prefix --absolute-git-dir`, then `git status --porcelain=v1 -z
@@ -279,15 +284,23 @@ for the markers `git rev-parse
 `GIT_OPTIONAL_LOCKS=0`, so it never takes a lock a commit beside it needs
 or writes the index, the C locale, and a timeout. It reads the prompt's
 draft only when you press `a`, to set the mention off from the words
-around the cursor. Its one stored value, whether the fullscreen tip was
-shown, lives in the store Claude Code keeps for each plugin.
+around the cursor. What it keeps between sessions lives in the store
+Claude Code keeps for each plugin (`~/.claude/plugins/store/`): whether the
+fullscreen tip was shown, and the open folders of the 50 projects changed
+most recently, as paths relative to each project's root.
 `claude plugin validate .` prints the same list from the source.
 
 The person's view (open folders, the previewed file, where each window
 stands, the filter's query) and the files Claude wrote this session live in
 `$.state`, so they survive a reload of the module and `/clear` starts
 afresh; what was read from disk, the filter's file list and git's status
-among it, lives in the module and is read again as needed.
+among it, lives in the module and is read again as needed. The whole
+tree's open folders are also saved for the project (`hooks/saved.ts`), so
+a session's first `/tree` and `/clear`, `/resume` and `/branch` open them
+again. Each project has a store key of its own, `expanded:` and its root,
+so sessions in different projects never write over each other; of two
+sessions in one project, the later change wins. A filtered tree's open
+folders are not saved.
 
 ## Develop
 

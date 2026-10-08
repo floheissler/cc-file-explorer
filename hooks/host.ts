@@ -23,10 +23,19 @@ export type StateCell<T> = {
 }
 
 /**
+ * A value of session state that a value kept in the store can start: it
+ * also says whether this session wrote it yet, as a session starts on its
+ * default.
+ */
+export type SeededStateCell<T> = StateCell<T> & {
+  readonly isSet: () => Promise<boolean>
+}
+
+/**
  * The pane's session state, value by value.
  */
 export type PaneState = {
-  readonly expanded: StateCell<string[]>
+  readonly expanded: SeededStateCell<string[]>
   readonly selected: StateCell<string | null>
   readonly treeTop: StateCell<number>
   readonly previewTop: StateCell<number>
@@ -93,12 +102,15 @@ export type Host = {
     readonly fill: (args: PromptFillArgs) => Promise<PromptFilled>
   }
   /**
-   * This plugin's own store, kept between sessions: what the pane has told
-   * the person once.
+   * This plugin's own store, kept between sessions and shared by every
+   * session that runs the mod: what the pane has told the person once, and
+   * each project's open folders.
    */
   readonly store: {
     readonly get: (key: string) => Promise<unknown>
     readonly set: (key: string, value: unknown) => Promise<void>
+    readonly delete: (key: string) => Promise<void>
+    readonly keys: () => Promise<readonly string[]>
   }
   readonly state: PaneState
 }

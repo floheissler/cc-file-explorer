@@ -25,6 +25,12 @@ export const WIDEN_TIP_TEXT = 'Widen the terminal to 110 columns to dock the tre
 export const TIP_SHOWN_KEY = 'fullscreenTipShown'
 
 /**
+ * The prefix of the store keys that keep a project's open folders; the rest
+ * of each key is the project root's identity (`rootIdOf`).
+ */
+export const EXPANDED_KEY_PREFIX = 'expanded:'
+
+/**
  * The key prefix of a tree row's Button; the rest of the key is the row's
  * path, so a focus event names the row it lands on.
  */
