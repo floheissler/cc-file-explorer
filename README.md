@@ -488,6 +488,12 @@ Unicode version.
 The version lives in `.claude-plugin/plugin.json` alone; bump it with every
 release, because users only receive a release whose version changed.
 
+## Support
+
+If `/tree` saves you time, [buy me a few tokens on Ko-fi](https://ko-fi.com/floheissler).
+
+[![Buy me a few tokens on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/floheissler)
+
 ## License
 
 [MIT](LICENSE) © Flo Heissler
