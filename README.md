@@ -128,9 +128,8 @@ tsc -p .                            # type-check against this build's API
 git) when it loads the mod with `--plugin-dir`; start one such session after a
 Claude Code update to refresh them.
 
-When you bump the version, change it in both `.claude-plugin/plugin.json` and
-`VERSION` in `hooks/names.ts`, which the pane's header shows. Users only
-receive a release whose version changed.
+The version lives in `.claude-plugin/plugin.json` alone; bump it with every
+release, because users only receive a release whose version changed.
 
 ## Roadmap
 

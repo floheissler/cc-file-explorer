@@ -46,8 +46,8 @@ the module otherwise:
 - Untrusted text (file names, file contents, error messages) goes through
   `sanitize` before it is drawn.
 - Tree row Buttons are keyed `row:<path>`; the `ui.focus` hook relies on it.
-- The version lives in two places: `.claude-plugin/plugin.json` and `VERSION`
-  in `hooks/names.ts` (shown in the pane's header). Bump both per release.
+- The version lives in `.claude-plugin/plugin.json` alone; the pane shows none.
+  Bump it per release, or `claude plugin update` delivers nothing.
 
 ## Develop
 

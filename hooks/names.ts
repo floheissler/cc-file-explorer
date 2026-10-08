@@ -1,9 +1,4 @@
 /**
- * The version the pane's header shows. Kept in step with plugin.json.
- */
-export const VERSION = '0.1.0'
-
-/**
  * The pane's tab label while other panes are open beside it.
  */
 export const PANE_TITLE = 'Explorer'

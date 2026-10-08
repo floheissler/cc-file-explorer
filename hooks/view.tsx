@@ -5,7 +5,7 @@ import type { ElementTable, RenderElement } from 'claude-code'
 
 import type { MarkdownMode } from '../types'
 import type { PaneLayout } from './layout'
-import { KEYS, ROW_KEY_PREFIX, VERSION } from './names'
+import { KEYS, ROW_KEY_PREFIX } from './names'
 import { baseName } from './paths'
 import {
   codeWindowOf,
@@ -102,11 +102,8 @@ export function paneView(
 
 function headerRow(kit: Kit, model: PaneModel): RenderElement {
   const { Box, Text, Button } = kit.ui
-  const version = `v${VERSION}`
   const controls = 'c: collapse r: refresh'
-  const room = kit.columns - controls.length - version.length - 3
-  const isVersionShown = room >= 8
-  const nameRoom = Math.max(4, isVersionShown ? room : kit.columns - controls.length - 2)
+  const nameRoom = Math.max(4, kit.columns - controls.length - 2)
 
   return (
     <Box flexDirection="row" height={1} columnGap={1}>
@@ -114,7 +111,6 @@ function headerRow(kit: Kit, model: PaneModel): RenderElement {
         {truncateMiddle(sanitize(model.rootName), nameRoom)}
       </Text>
       <Box flexGrow={1} />
-      {isVersionShown && <Text dimColor>{version}</Text>}
       <Button
         key={KEYS.collapseAll}
         label="collapse"
