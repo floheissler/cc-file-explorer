@@ -118,12 +118,13 @@ const ringOnto = (element: string) =>
 
 /**
  * Records where the ring lands, standing in for Claude Code beneath the
- * plugin's focus hook.
+ * plugin's focus hook. It names the plugin: a test's `ui.focus` hook naming
+ * none hears only its own elements (2.1.323), not the pane's.
  */
 function recordFocus(on: On): (string | undefined)[] {
   const focused: (string | undefined)[] = []
 
-  on('ui.focus', ($, e) => {
+  on('ui.focus', { plugin: 'file-explorer' }, ($, e) => {
     focused.push(e.element)
 
     return {}
@@ -386,6 +387,42 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.unmount()
   })
 }
+
+test('minimized to a widget on the Desktop app, the pane draws as docked at its size', async ($, on) => {
+  stubProject(on, FOLDERS, FILES)
+  await openTree($)
+
+  const widget = {
+    ...PANE,
+    surface: 'desktop',
+    props: {
+      ...PANE.props,
+      bodyColumns: 40,
+      placement: 'widget',
+      anchoredEdges: ['bottom', 'right'],
+      scroll: { offset: 0, bodyRows: 12 },
+    },
+  } as const
+
+  const ui = await $.ui.mount(widget)
+
+  // A picked file shows under the tree, with the dock's pin; inline would
+  // show it in the tree's place
+  await ui.press({ key: 'row:README.md' })
+  expect(await ui.find({ key: 'row:src' })).toBeDefined()
+  expect(await ui.find({ type: 'Markdown' })).toBeDefined()
+  expect(await ui.find({ key: 'preview-pin' })).toBeDefined()
+
+  // The very drawing the dock gets in a body of the widget's size
+  const drawn = await ui.drawn()
+  const { anchoredEdges, ...props } = widget.props
+
+  expect(anchoredEdges).toEqual(['bottom', 'right'])
+  await ui.redraw({ ...props, placement: 'dock' })
+  expect(await ui.drawn()).toEqual(drawn)
+
+  await ui.unmount()
+})
 
 /**
  * A mounted pane, as the waits below drive it.

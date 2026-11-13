@@ -64,7 +64,9 @@ entry with `"source": "./"`). README.md has the user-facing behavior.
   `searching.test.ts` the in-file search, and `filtering.test.ts` the filter
   and `git.test.ts` the markers with git stubbed too. An unstubbed `process.run` rejects, as git missing does: the
   other suites draw no git markers. A stub answers by `argv[1]`
-  (`ls-files`, `rev-parse`, `status`), as both features run git.
+  (`ls-files`, `rev-parse`, `status`), as both features run git. A test's
+  `ui.focus` hook names `{ plugin: 'file-explorer' }`: from 2.1.323 one
+  naming no plugin hears only its own elements, and the pane's moves fail.
 - `docs/`: the README's demo GIF, 1920 px wide and under 1 MB. Every
   install copies the whole repository, the GIF included, so keep a new
   recording as small (half a 4K capture, one shared 256-color palette).
@@ -102,8 +104,12 @@ the module otherwise:
   one view shows at a time (`inlineViewOf`: the help, the picked file while
   `isFileShown`, else the tree), as tall as its content (`inlineLayoutOf`);
   the help is drawn whole, for Claude Code's window over the pane to scroll.
-  A bare `/tree` always opens on the tree. `e.viewport.isFullscreen ===
-  false` is the classic renderer: no mouse, and Esc closes an inline pane.
+  Every seat but `inline` lays out as the dock (`placementOf`), as Claude
+  Code's types ask of a seat a mod does not know: so does the Desktop app's
+  `widget` (2.1.323), the small form of a minimized pane, whose close then
+  closes rather than stepping back. A bare `/tree` always opens on the
+  tree. `e.viewport.isFullscreen === false` is the classic renderer: no
+  mouse, and Esc closes an inline pane.
 - `/tree <path>` never closes the pane: it opens it, or reveals in the shown
   one, which keeps what it read and closes its filter first (`closeFilter`),
   as the entry shows in the whole tree. It opens the entry's folders (a folder

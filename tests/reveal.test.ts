@@ -393,7 +393,7 @@ describe('/tree <path>', () => {
 
   test('the revealed row gives up the ring as the person moves it, or picks a file', async ($, on) => {
     projectOf(on, SMALL)
-    on('ui.focus', () => ({}))
+    on('ui.focus', { plugin: 'file-explorer' }, () => ({}))
 
     await tree($, 'src')
 

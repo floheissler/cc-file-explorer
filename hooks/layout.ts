@@ -119,6 +119,30 @@ export function regionAt(layout: PaneLayout, row: number): Region {
 }
 
 /**
+ * How a drawing lays the pane out: docked, the tree and the preview share
+ * the body; inline, one view shows at a time, as tall as its content.
+ */
+export type Placement = 'dock' | 'inline'
+
+/**
+ * The layout for the seat a drawing names (`e.props.placement`): `inline`
+ * above the prompt, and every other seat as the dock, as Claude Code's
+ * types ask of a seat a mod does not know.
+ *
+ * That covers the Desktop app's `widget`, the small form of a minimized
+ * pane: a box the surface sizes, as it sizes the dock, so the tree (and the
+ * preview under it, while a file is picked) fits the box as docked, and a
+ * close there closes, never steps back and opens the pane again as an
+ * inline close does.
+ *
+ * @param seated where the surface seated the pane
+ * @returns the layout to draw
+ */
+export function placementOf(seated: string): Placement {
+  return seated === 'inline' ? 'inline' : 'dock'
+}
+
+/**
  * What an inline pane shows, one view at a time: the tree, the file picked
  * from it, or the help.
  */

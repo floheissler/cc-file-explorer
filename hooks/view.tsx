@@ -5,7 +5,7 @@ import type { ElementTable, RenderElement, ThemeKey } from 'claude-code'
 
 import type { MarkdownMode } from '../types'
 import { fitRow, hintOf, legendsOf, wrapCells, type Control, type Legend } from './fit'
-import type { InlineView, PaneLayout } from './layout'
+import type { InlineView, PaneLayout, Placement } from './layout'
 import Limits from './limits'
 import { depthKeyOf, KEYS, ROW_KEY_PREFIX } from './names'
 import { nameOf } from './paths'
@@ -110,12 +110,13 @@ export type PaneActions = {
 
 /**
  * Where the pane sits, as each drawing says: docked beside the transcript,
- * or inline above the prompt; and whether the session draws with Claude
- * Code's classic renderer, which has no mouse and closes an inline pane on
- * Esc (fullscreen below 110 columns seats a pane inline too).
+ * or inline above the prompt (a Desktop widget draws as docked, see
+ * `placementOf`); and whether the session draws with Claude Code's classic
+ * renderer, which has no mouse and closes an inline pane on Esc (fullscreen
+ * below 110 columns seats a pane inline too).
  */
 export type Seat = {
-  readonly placement: 'dock' | 'inline'
+  readonly placement: Placement
   readonly isClassic: boolean
 }
 

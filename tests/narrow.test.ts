@@ -85,7 +85,7 @@ function stubProject(on: On): void {
   on('session.root', () => ({ value: ROOT }))
   on('ui.panes', () => ({ value: [] }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  on('ui.focus', () => ({}))
+  on('ui.focus', { plugin: 'file-explorer' }, () => ({}))
   on('process.run', ($, e) => ({
     value: {
       exitCode: 0,
@@ -183,12 +183,14 @@ const VIEWS: readonly {
 const SEATS = [
   { name: 'docked, terminal', surface: 'terminal', placement: 'dock', isFullscreen: true, pad: 1 },
   { name: 'docked, desktop', surface: 'desktop', placement: 'dock', isFullscreen: true, pad: 1 },
+  // Minimized on the Desktop app: drawn as docked
+  { name: 'widget, desktop', surface: 'desktop', placement: 'widget', isFullscreen: true, pad: 1 },
   { name: 'inline, classic', surface: 'terminal', placement: 'inline', isFullscreen: false, pad: 0 },
 ] as const
 
 describe('rows fit the body at every width', () => {
   for (const seat of SEATS) {
-    for (const view of VIEWS.filter(shown => shown.isDockOnly !== true || seat.placement === 'dock')) {
+    for (const view of VIEWS.filter(shown => shown.isDockOnly !== true || seat.placement !== 'inline')) {
       test(`${view.name}, ${seat.name}`, async ($, on) => {
         stubProject(on)
         await openTree($, seat.isFullscreen)

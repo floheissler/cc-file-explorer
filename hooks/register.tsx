@@ -24,6 +24,7 @@ import {
   inlineLayoutOf,
   inlineViewOf,
   paneLayoutOf,
+  placementOf,
   regionAt,
   type PaneLayout,
 } from './layout'
@@ -2170,8 +2171,8 @@ export const register: Register = on => {
 
     // The layout follows each drawing's seat: the pane moves between the dock
     // and inline as the terminal is resized. Inline it shows one view, as
-    // tall as its content.
-    seat = { placement: e.props.placement, isClassic: e.viewport?.isFullscreen === false }
+    // tall as its content; a Desktop widget draws as the dock
+    seat = { placement: placementOf(e.props.placement), isClassic: e.viewport?.isFullscreen === false }
     room = e.props.scroll.bodyRows
 
     // Without the keyboard the pane shows no ring, and it takes the keyboard

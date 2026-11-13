@@ -1,6 +1,17 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { escapeStepOf, inlineLayoutOf, inlineViewOf, paneLayoutOf } from '../hooks/layout'
+import { escapeStepOf, inlineLayoutOf, inlineViewOf, paneLayoutOf, placementOf } from '../hooks/layout'
+
+describe('placementOf', () => {
+  test('lays out inline above the prompt, and every other seat as the dock', async () => {
+    expect(placementOf('inline')).toBe('inline')
+    expect(placementOf('dock')).toBe('dock')
+
+    // The Desktop app's minimized pane, and a seat a later release may add
+    expect(placementOf('widget')).toBe('dock')
+    expect(placementOf('sidebar')).toBe('dock')
+  })
+})
 
 describe('inlineViewOf', () => {
   test('shows the help while asked for, else a picked and shown file, else the tree', async () => {

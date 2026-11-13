@@ -100,6 +100,8 @@ on how Claude Code draws:
   - The classic renderer has no mouse, so everything works from the keys.
   - Ctrl+X ↑/↓ resizes the pane; Claude Code keeps that size for every pane
     above the prompt.
+- **Minimized to a widget**, in the Desktop app: the pane keeps its docked
+  layout, fitted to the widget's size.
 
 ### Show a file or folder
 

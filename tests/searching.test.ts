@@ -51,7 +51,7 @@ function stubProject(on: On): void {
   on('session.root', () => ({ value: ROOT }))
   on('ui.panes', () => ({ value: [] }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  on('ui.focus', () => ({}))
+  on('ui.focus', { plugin: 'file-explorer' }, () => ({}))
   on('fs.list', ($, e) => ({ value: FOLDERS[testPathOf(e.path)] ?? [] }))
   on('fs.stat', ($, e) => ({
     value: {

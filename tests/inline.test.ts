@@ -171,7 +171,7 @@ describe('an inline pane', () => {
     const fills: string[] = []
 
     on('session.cwd', () => ({ value: ROOT }))
-    on('ui.focus', () => ({}))
+    on('ui.focus', { plugin: 'file-explorer' }, () => ({}))
     on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))
     on('prompt.fill', ($, e) => {
       fills.push(e.text)
@@ -232,7 +232,7 @@ describe('an inline pane', () => {
 
   test('keeps the picked file as the ring walks the tree, with no preview beside it to follow', async ($, on) => {
     projectOf(on, ['README.md', 'a.txt'])
-    on('ui.focus', () => ({}))
+    on('ui.focus', { plugin: 'file-explorer' }, () => ({}))
     await treeIn($, CLASSIC)
 
     const ui = await $.ui.mount(INLINE)
