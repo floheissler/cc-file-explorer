@@ -366,8 +366,13 @@ the module otherwise:
   classic renderer included, and hands the prompt the keyboard (checked
   live on 2.1.294). The mentioned row is then the tree's `landing` row
   (`mentioned`, before `revealed`), so Ctrl+X Tab brings the ring back to
-  it; it lets go once the ring lands anywhere. A test's hook cannot give a
-  refusal cause (`dialog`, `no_composer`): the engine strips a hook's own.
+  it; it lets go once the ring lands anywhere. Each refusal cause the engine
+  gives has a toast of its own (`mentionToastOf`); `unanswered` (from
+  2.1.329: a remote app, the Desktop app's, was asked and said nothing in
+  5 s) never says the mention failed, as the text may have landed. A new
+  cause fails `validate` until it has one. A test's hook cannot give a
+  refusal cause (`dialog`, `no_composer`, `unanswered`): the engine strips a
+  hook's own.
 - A mention is spelled as Claude Code 2.1.294 reads one (its source, and a
   live probe): relative to `$.session.cwd()`, which a shell `cd` moves and
   the root does not, with `..` from a subfolder and absolute once outside

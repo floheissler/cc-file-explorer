@@ -128,4 +128,10 @@ describe('mentionToastOf', () => {
     expect(mentionToastOf('no_composer', 'a.ts')).toBe('This session has no prompt box to mention a file in')
     expect(mentionToastOf('refused', 'a.ts')).toBe('The prompt box did not take the mention of a.ts')
   })
+
+  test('never says a mention an app left unanswered failed, as it may have landed', async () => {
+    expect(mentionToastOf('unanswered', 'a.ts')).toBe(
+      'The app did not confirm the mention of a.ts: check the prompt box',
+    )
+  })
 })

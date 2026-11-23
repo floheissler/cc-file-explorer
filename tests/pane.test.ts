@@ -137,7 +137,7 @@ function recordFocus(on: On): (string | undefined)[] {
  * The prompt box, standing in for Claude Code beneath the plugin: it holds
  * `box` and takes every fill, or refuses each; and the toasts the plugin
  * raised. A test's hook answers as a hook does, so its refusal carries no
- * cause (`dialog`, `no_composer`): those only the engine gives.
+ * cause (`dialog`, `no_composer`, `unanswered`): those only the engine gives.
  */
 function stubPrompt(on: On, box: PromptBox, isRefusing = false) {
   const fills: PromptFillInput[] = []

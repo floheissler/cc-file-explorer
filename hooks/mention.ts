@@ -144,11 +144,20 @@ export function insertionOf(box: PromptBox, mention: string): string {
 const NAME_CELLS = 40
 
 /**
- * Why `a` mentioned nothing: no target, a path no mention can name, the
- * prompt box refusing the text (under a dialog, without a box, or a hook's
- * own refusal), or a call that failed.
+ * Why `a` may have mentioned nothing: no target, a path no mention can
+ * name, the prompt box refusing the text (under a dialog, without a box, or
+ * a hook's own refusal), an app that was asked to fill its box and never
+ * answered (`unanswered`, from 2.1.329: the text may have landed), or a call
+ * that failed.
  */
-export type MentionFailure = 'none' | MentionProblem | 'dialog' | 'no_composer' | 'refused' | 'failed'
+export type MentionFailure =
+  | 'none'
+  | MentionProblem
+  | 'dialog'
+  | 'no_composer'
+  | 'unanswered'
+  | 'refused'
+  | 'failed'
 
 /**
  * What a toast says when `a` mentions nothing.
@@ -174,6 +183,8 @@ export function mentionToastOf(reason: MentionFailure, key?: string, detail?: st
       return 'A dialog holds the prompt: close it, then press a again'
     case 'no_composer':
       return 'This session has no prompt box to mention a file in'
+    case 'unanswered':
+      return `The app did not confirm the mention of ${name}: check the prompt box`
     case 'refused':
       return `The prompt box did not take the mention of ${name}`
     case 'failed':
